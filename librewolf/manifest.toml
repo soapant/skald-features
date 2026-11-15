@@ -1,0 +1,7 @@
+name = "librewolf"
+description = ""
+
+[provides]
+
+[depends]
+control_center

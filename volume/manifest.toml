@@ -1,0 +1,8 @@
+name = "volume"
+description = ""
+
+[provides]
+toggle.playpause
+
+[depends]
+control_center

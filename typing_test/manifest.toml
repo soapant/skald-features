@@ -1,0 +1,8 @@
+name = "typing_test"
+description = ""
+
+[provides]
+
+[depends]
+control_center
+

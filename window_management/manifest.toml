@@ -1,0 +1,8 @@
+name = "window_management"
+description = ""
+
+[provides]
+
+[depends]
+control_center
+

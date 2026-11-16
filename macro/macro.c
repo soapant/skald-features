@@ -494,15 +494,6 @@ static void RecordToggle(void) {
   sk_dismiss_overlay(MACRO_OVERLAY_NAME);
   recording = false;
 }
-static void crosshair_render(void) {
-  int size = 5;
-
-  sk_draw_line(.x1 = 15 - size, .y1 = 15, .x2 = 15 + size, .y2 = 15,
-               .color = SK_BLUE, .thickness = 3);
-
-  sk_draw_line(.x1 = 15, .y1 = 15 - size, .x2 = 15, .y2 = 15 + size,
-               .color = SK_BLUE, .thickness = 3);
-}
 
 SKALD_FEATURE_INIT {
   sk_register_hotkey(.hotkey = "Ctrl+Alt+R", .cb = RecordToggle);

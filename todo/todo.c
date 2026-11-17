@@ -28,6 +28,9 @@ typedef struct {
 
 #define TODO_CONFIG_MASTER                                                     \
   X("-s", "Skald", "Skald", RGB(137, 180, 250), true)                          \
+  X("-pm", "MinecraftModpack", "MinecraftModpack", RGB(250, 179, 135), true)   \
+  X("-pb", "CocBot", "CocBot", RGB(249, 226, 175), true)                       \
+  X("-pi", "IndieGame", "IndieGame", RGB(19, 26, 105), true)                   \
   X("-m", NULL, "Misc", RGB(225, 225, 225), false)                             \
   X("-l", NULL, "Learning", RGB(166, 227, 161), false)                         \
   X("-b", NULL, "Bored", RGB(203, 166, 247), false)                            \
@@ -41,6 +44,7 @@ typedef struct {
   X("-ne", NULL, "NotImplementedYet", RGB(155, 255, 35), false)                \
   X("-ft", NULL, "Feature", RGB(250, 205, 102), false)                         \
   X("-c", NULL, "Change", RGB(150, 105, 12), false)                            \
+  X("-sk", NULL, "SkApi", RGB(10, 105, 12), false)
 
 #define X(flag, internal, label, color, is_alias) {flag, NULL},
 const GenericFlagEntry TODO_CONFIG_FLAGS[] = {TODO_CONFIG_MASTER};
@@ -65,9 +69,9 @@ static ColorRef GetTagColor(const char *tag_text) {
   return COLOR_TEXT;
 }
 
-static void ParseTodoInput(const char *input, TodoAliasEntry *alias_out,
-                           TodoConfigEntry *config_out, char *clean_text,
-                           char tags_out[][64], int *tag_count) {
+static void parse_todo_input(const char *input, TodoAliasEntry *alias_out,
+                             TodoConfigEntry *config_out, char *clean_text,
+                             char tags_out[][64], int *tag_count) {
   if (!input)
     return;
 
@@ -173,7 +177,7 @@ static void ParseTodoLine(const char *line, char *clean_text,
   }
 }
 
-static void AddTodoToFile(const char *text) {
+static void add_todo_to_file(const char *text) {
   if (!text || strlen(text) == 0)
     return;
 
@@ -190,7 +194,7 @@ static void AddTodoToFile(const char *text) {
   char tags[10][64];
   int tag_count = 0;
 
-  ParseTodoInput(input_copy, &alias, &config, clean_text, tags, &tag_count);
+  parse_todo_input(input_copy, &alias, &config, clean_text, tags, &tag_count);
 
   for (int i = 0; i < count; i++) {
     char existing_clean[512];
@@ -199,7 +203,7 @@ static void AddTodoToFile(const char *text) {
     ParseTodoLine(lines.items[i], existing_clean, existing_tags,
                   &existing_tag_count);
     if (strcmp(existing_clean, clean_text) == 0) {
-      sk_free_file_list(&lines);
+      sk_free_string_list(&lines);
       return;
     }
   }
@@ -221,14 +225,14 @@ static void AddTodoToFile(const char *text) {
   char **grown =
       (char **)realloc(lines.items, (size_t)(count + 1) * sizeof(char *));
   if (!grown) {
-    sk_free_file_list(&lines);
+    sk_free_string_list(&lines);
     return;
   }
   lines.items = grown;
   lines.items[count] = new_entry;
   sk_write_to_file(TODO_FILE_PATH, (const char **)lines.items, count + 1);
   lines.items[count] = NULL;
-  sk_free_file_list(&lines);
+  sk_free_string_list(&lines);
 }
 
 static void RemoveTodoItemFromFile(const char *item_to_remove) {
@@ -237,7 +241,7 @@ static void RemoveTodoItemFromFile(const char *item_to_remove) {
   SkStringList lines = sk_load_file_list(TODO_FILE_PATH);
   int count = lines.count;
   if (count == 0) {
-    sk_free_file_list(&lines);
+    sk_free_string_list(&lines);
     return;
   }
   int kept_count = 0;
@@ -268,7 +272,7 @@ static void RemoveTodoItemFromFile(const char *item_to_remove) {
   sk_write_to_file(TODO_FILE_PATH, (const char **)lines.items, kept_count);
   for (int i = kept_count; i < count; i++)
     lines.items[i] = NULL;
-  sk_free_file_list(&lines);
+  sk_free_string_list(&lines);
 }
 
 static void todo_refresh_callback(PromptState *state) {
@@ -277,14 +281,14 @@ static void todo_refresh_callback(PromptState *state) {
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
                       .items = (const char **)files.items,
                       .count = (int)files.count);
-  sk_free_file_list(&files);
+  sk_free_string_list(&files);
 }
 
 static bool todo_enter_callback(PromptState *state) {
   if (sk_is_selected(state->lb)) {
     RemoveTodoItemFromFile(state->lb->selected_text);
   } else {
-    AddTodoToFile(state->eb->filter);
+    add_todo_to_file(state->eb->filter);
   }
   return true;
 }
@@ -293,7 +297,7 @@ static bool todo_ctrlenter_callback(PromptState *state) {
   if (sk_is_selected(state->lb)) {
     RemoveTodoItemFromFile(state->lb->selected_text);
   } else {
-    AddTodoToFile(state->eb->filter);
+    add_todo_to_file(state->eb->filter);
     sk_set_edit_text("");
   }
   todo_refresh_callback(state);
@@ -349,15 +353,15 @@ static void todo_edit_callback(PromptState *state) {
   todo_refresh_callback(state);
 }
 
-static void TriggerTodo(void) {
+static void trigger_todo(void) {
   sk_window(.title = "Todo", .refresh = todo_refresh_callback,
             .enter = todo_enter_callback, .ctrl_enter = todo_ctrlenter_callback,
             .render = todo_render_callback, .edit = todo_edit_callback);
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Alt+T", .cb = TriggerTodo);
+  sk_register_hotkey(.hotkey = "Alt+T", .cb = trigger_todo);
 
-  sk_add_feature(.display_name = "Todo", .on_action = TriggerTodo,
+  sk_add_feature(.display_name = "Todo", .on_action = trigger_todo,
                  .icon = "/list-check.png");
 }

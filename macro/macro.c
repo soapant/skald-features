@@ -36,7 +36,7 @@ static MacroEvent events[MACRO_MAX_EVENTS];
 static int event_count = 0;
 static bool overflow = false;
 
-static void recording_render() {
+static void recording_render(void *ud) {
   int max_x = WIDTH - 1;
   int max_y = HEIGHT - 1;
 
@@ -46,7 +46,7 @@ static void recording_render() {
   sk_draw_line(.x1 = 0, .y1 = max_y, .x2 = 0, .y2 = 0, .color = SK_RED);
 }
 
-static void playback_render() {
+static void playback_render(void *ud) {
   int max_x = WIDTH - 1;
   int max_y = HEIGHT - 1;
 
@@ -437,7 +437,7 @@ static void LoadMacro(void) {
             .auto_scale = true);
 }
 
-static void macro_show_overlay(void (*render)(void)) {
+static void macro_show_overlay(void (*render)(void *ud)) {
   sk_overlay(.name = MACRO_OVERLAY_NAME, .render = render, .w = WIDTH,
              .h = HEIGHT, .x = WIDTH / 2, .y = HEIGHT / 2, .no_bg = true);
 }
@@ -460,7 +460,7 @@ static void PlayMacro(void) {
   release_everything();
 }
 
-static void InfinitePlaybackToggle(void) {
+static void infinite_playback_toggle(void) {
   macro_infinite = !macro_infinite;
   if (macro_infinite)
     sk_message(.message = "Infinite playback enabled", .timeout = 1.0,
@@ -480,7 +480,7 @@ static void RemoveDeadTimeToggle(void) {
                .slot = BOTTOM_CENTER);
 }
 
-static void RecordToggle(void) {
+static void record_toggle(void) {
   if (!recording) {
     macro_show_overlay(recording_render);
     sk_clear_key_queue();
@@ -496,14 +496,14 @@ static void RecordToggle(void) {
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Ctrl+Alt+R", .cb = RecordToggle);
+  sk_register_hotkey(.hotkey = "Ctrl+Alt+R", .cb = record_toggle);
   sk_register_hotkey(.hotkey = "Ctrl+Alt+P", .cb = PlayMacro);
   sk_add_to_cc(.display_name = "SaveMacro", .on_action = SaveMacro,
                .type = "Macro", .icon = "/save.png");
   sk_add_to_cc(.display_name = "LoadMacro", .on_action = LoadMacro,
                .type = "Macro", .icon = "/load.png");
   sk_add_to_cc(.display_name = "InfinitePlayback",
-               .on_action = InfinitePlaybackToggle, .type = "Macro",
+               .on_action = infinite_playback_toggle, .type = "Macro",
                .icon = "/repeat.png");
   sk_add_to_cc(.display_name = "RemoveDeadTime",
                .on_action = RemoveDeadTimeToggle, .type = "Macro",

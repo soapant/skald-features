@@ -393,7 +393,7 @@ static void net_row(int y, const char *label, const char *value,
                .align = "RIGHT");
 }
 
-static void internet_hover_render() {
+static void internet_hover_render(void *ud) {
   char today[32], month[32], rate[32];
   sk_format_bytes(net.today_bytes, today, sizeof(today));
   sk_format_bytes(net.month_bytes, month, sizeof(month));
@@ -411,7 +411,7 @@ static void internet_hover_render() {
 }
 
 static void on_internet_hover(void) {
-  PlPos pos = sk_get_widget_pos("internet");
+  Pos pos = sk_get_widget_pos("internet");
   sk_message(.x = pos.x, .y = pos.y - 70, .w = NET_POPUP_W, .h = NET_POPUP_H,
              .render = internet_hover_render, .hover_key = "internet");
 }

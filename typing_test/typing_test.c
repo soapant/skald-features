@@ -201,6 +201,8 @@ static char *typing_test_get_random_text(int word_count) {
       "lobster",
       "crab",
       "crayfish",
+      "shrimp",
+      "lobster",
       "crane",
       "eagle",
       "vulture",
@@ -1422,14 +1424,14 @@ static void typing_test_render(PromptState *state) {
   free(positions);
 }
 
-static void TriggerTypingTest(void) {
+static void trigger_typing_test(void) {
   sk_window(.enter = typing_test_enter, .render = typing_test_render,
             .on_close = typing_test_reset);
 }
 
 SKALD_FEATURE_INIT {
   text = typing_test_get_random_text(typing_test_word_count);
-  sk_register_hotkey(.hotkey = "Alt+B", .cb = TriggerTypingTest);
-  sk_add_feature(.display_name = "Typing Test", .on_action = TriggerTypingTest,
-                 .icon = "/keyboard.png");
+  sk_register_hotkey(.hotkey = "Alt+B", .cb = trigger_typing_test);
+  sk_add_feature(.display_name = "Typing Test",
+                 .on_action = trigger_typing_test, .icon = "/keyboard.png");
 }

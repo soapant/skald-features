@@ -59,7 +59,7 @@ static int (*p_sqlite3_bind_int64)(sqlite3_stmt *, int, sqlite3_int64) = NULL;
 
 static int time_between_qs = 10;
 
-#define USED_DECK "" // your wanted deck
+#define WANTED_DECK "" // Wanted Deck Here
 
 static char *safe_strdup(const char *s) {
   if (!s)
@@ -482,7 +482,7 @@ static void print_due_card(void) {
   snprintf(buf, sizeof(buf), "%s/.local/share/Anki2/User 1/collection.anki2",
            sk_resolve_user_path());
 #endif
-  CardList list = get_cards_in_deck(buf, USED_DECK);
+  CardList list = get_cards_in_deck(buf, WANTED_DECK);
   long long now = (long long)time(NULL);
   size_t *due = malloc(list.count * sizeof(size_t));
   size_t due_count = 0;
@@ -529,6 +529,6 @@ static bool should_swallow_anki(void) {
 SKALD_FEATURE_INIT {
   srand((time(NULL)));
   // sk_run_every(time_between_qs, print_due_card);
-  // sk_register_hotkey(.hotkey = "Shift+Space", .cb = handle_anki,
-  //                    .should_swallow = should_swallow_anki);
+  sk_register_hotkey(.hotkey = "Shift+Space", .cb = handle_anki,
+                     .should_swallow = should_swallow_anki);
 }

@@ -369,23 +369,23 @@ static void set_volume_to_100() { set_volume(100); }
 static void set_volume_to_0() { set_volume(0); }
 
 SKALD_FEATURE_INIT {
-  sk_add_to_cc(.type = "VolumeControl",
+  sk_add_to_cc(.type = "Volume Control",
                .display_name = "Increment Volume By 10",
                .on_action = increment_volume, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl",
+  sk_add_to_cc(.type = "Volume Control",
                .display_name = "Decrement Volume By 10",
                .on_action = decrement_volume, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl", .display_name = "Set Volume To 0%",
+  sk_add_to_cc(.type = "Volume Control", .display_name = "Set Volume To 0%",
                .on_action = set_volume_to_0, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl", .display_name = "Set Volume To 25%",
+  sk_add_to_cc(.type = "Volume Control", .display_name = "Set Volume To 25%",
                .on_action = set_volume_to_25, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl", .display_name = "Set Volume To 50%",
+  sk_add_to_cc(.type = "Volume Control", .display_name = "Set Volume To 50%",
                .on_action = set_volume_to_50, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl", .display_name = "Set Volume To 75%",
+  sk_add_to_cc(.type = "Volume Control", .display_name = "Set Volume To 75%",
                .on_action = set_volume_to_75, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl", .display_name = "Set Volume To 100%",
+  sk_add_to_cc(.type = "Volume Control", .display_name = "Set Volume To 100%",
                .on_action = set_volume_to_100, .icon = "/volume.png");
-  sk_add_to_cc(.type = "VolumeControl", .display_name = "Toggle Play/Pause",
+  sk_add_to_cc(.type = "Volume Control", .display_name = "Toggle Play/Pause",
                .on_action = toggle_play_pause, .icon = "/volume.png");
   sk_cap_register("toggle.playpause", toggle_play_pause);
 }

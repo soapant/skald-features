@@ -17,9 +17,9 @@ typedef struct {
   char name[PK_NAME_LEN];
   unsigned long long rss_kb;
   double cpu;
-} PkProc;
+} pk_proc;
 
-static PkProc pk[PK_MAX];
+static pk_proc pk[PK_MAX];
 static int pk_count = 0;
 static int pk_sort_mode = 0;
 static SkTimer pk_last_collect;
@@ -36,16 +36,16 @@ static const char *pk_sort_label(int mode) {
 }
 
 static int pk_cmp_mem(const void *a, const void *b) {
-  const PkProc *x = a;
-  const PkProc *y = b;
+  const pk_proc *x = a;
+  const pk_proc *y = b;
   if (x->rss_kb != y->rss_kb)
     return x->rss_kb < y->rss_kb ? 1 : -1;
   return strcmp(x->name, y->name);
 }
 
 static int pk_cmp_cpu(const void *a, const void *b) {
-  const PkProc *x = a;
-  const PkProc *y = b;
+  const pk_proc *x = a;
+  const pk_proc *y = b;
   if (x->cpu != y->cpu)
     return x->cpu < y->cpu ? 1 : -1;
   if (x->rss_kb != y->rss_kb)
@@ -54,7 +54,7 @@ static int pk_cmp_cpu(const void *a, const void *b) {
 }
 
 static int pk_cmp_alpha(const void *a, const void *b) {
-  return strcasecmp(((const PkProc *)a)->name, ((const PkProc *)b)->name);
+  return strcasecmp(((const pk_proc *)a)->name, ((const pk_proc *)b)->name);
 }
 
 #if defined(__linux__)
@@ -110,7 +110,7 @@ static void pk_parse_line(char *line) {
   if (pk_count >= PK_MAX)
     return;
 
-  PkProc *p = &pk[pk_count++];
+  pk_proc *p = &pk[pk_count++];
   snprintf(p->name, sizeof(p->name), "%s", name);
   p->rss_kb = strtoull(rss_s, NULL, 10);
   p->cpu = strtod(cpu_s, NULL);
@@ -253,7 +253,7 @@ static void pk_collect_running_processes(void) {
 static void pk_sort(void) {
   if (pk_count <= 1)
     return;
-  qsort(pk, (size_t)pk_count, sizeof(PkProc),
+  qsort(pk, (size_t)pk_count, sizeof(pk_proc),
         pk_sort_mode == 0   ? pk_cmp_mem
         : pk_sort_mode == 1 ? pk_cmp_cpu
                             : pk_cmp_alpha);
@@ -406,14 +406,14 @@ static void pk_render_callback(PromptState *state) {
   sk_listbox_end();
 }
 
-static void TriggerProcessKiller(void) {
+static void trigger_process_killer(void) {
   pk_collect_and_sort();
   sk_window(.title = "ProcessKiller", .refresh = pk_refresh_callback,
             .enter = pk_enter_callback, .render = pk_render_callback);
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Alt+U", .cb = TriggerProcessKiller);
+  sk_register_hotkey(.hotkey = "Alt+U", .cb = trigger_process_killer);
   sk_add_feature(.display_name = "Process Killer",
-                 .on_action = TriggerProcessKiller, .icon = "/skull.png");
+                 .on_action = trigger_process_killer, .icon = "/skull.png");
 }

@@ -45,7 +45,7 @@ static void zoxide_refresh(PromptState *state) {
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
                       .items = (const char **)files.items,
                       .count = (int)files.count);
-  sk_free_file_list(&files);
+  sk_free_string_list(&files);
 }
 static void zoxide_edit(PromptState *state) {
   int idx = -1;
@@ -69,17 +69,17 @@ static bool zoxide_enter(PromptState *state) {
   free(path);
   return true;
 }
-static void TriggerZoxide(void) {
+static void trigger_zoxide(void) {
   SkStringList files = sk_load_file_list(TerminalZoxideFilePath);
   sk_window(.title = "Zoxide", .items = (const char **)files.items,
             .refresh = zoxide_refresh, .enter = zoxide_enter,
             .edit = zoxide_edit);
-  sk_free_file_list(&files);
+  sk_free_string_list(&files);
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Alt+W", .cb = TriggerZoxide);
+  sk_register_hotkey(.hotkey = "Alt+W", .cb = trigger_zoxide);
 
-  sk_add_feature(.display_name = "Zoxide", .on_action = TriggerZoxide,
+  sk_add_feature(.display_name = "Zoxide", .on_action = trigger_zoxide,
                  .icon = "/folder.png");
 }

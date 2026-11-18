@@ -178,11 +178,12 @@ static void draw_usage(const char *label, unsigned long long used,
   if (total == 0) {
     snprintf(buf, sizeof(buf), "%s??", label);
   } else {
-    char used_str[32];
-    char total_str[32];
-    sk_format_bytes(used, used_str, sizeof(used_str));
-    sk_format_bytes(total, total_str, sizeof(total_str));
-    snprintf(buf, sizeof(buf), "%s%s/%s", label, used_str, total_str);
+    char *used_str = sk_format_bytes(used);
+    char *total_str = sk_format_bytes(total);
+    snprintf(buf, sizeof(buf), "%s%s/%s", label, used_str ? used_str : "?",
+             total_str ? total_str : "?");
+    free(used_str);
+    free(total_str);
   }
   sk_draw_text(.text = buf, .x = 10, .y = 6, .fontsize = FONTSIZE,
                .color = usage_color(used, total), .align = "LEFT");
@@ -311,8 +312,8 @@ static void net_usage_load(void) {
   net.today_day = tm_now.tm_mday;
   net.month_index = tm_now.tm_mon;
 
-  char body[512];
-  if (sk_load_file(NET_STATE_FILE, body, sizeof(body)) <= 0)
+  char *body = sk_load_file(NET_STATE_FILE);
+  if (!body)
     return;
 
   char *cursor = body;
@@ -332,6 +333,7 @@ static void net_usage_load(void) {
     }
     cursor = nl ? nl + 1 : NULL;
   }
+  free(body);
 }
 
 static void net_usage_save(void) {
@@ -394,10 +396,9 @@ static void net_row(int y, const char *label, const char *value,
 }
 
 static void internet_hover_render(void *ud) {
-  char today[32], month[32], rate[32];
-  sk_format_bytes(net.today_bytes, today, sizeof(today));
-  sk_format_bytes(net.month_bytes, month, sizeof(month));
-  sk_format_bytes(net.rate_bps * 1024, rate, sizeof(rate));
+  char *today = sk_format_bytes(net.today_bytes);
+  char *month = sk_format_bytes(net.month_bytes);
+  char *rate = sk_format_bytes(net.rate_bps * 1024);
 
   int y = NET_PAD;
   net_row(y, "rate now:", rate, RGB(160, 220, 255));
@@ -408,6 +409,9 @@ static void internet_hover_render(void *ud) {
 
   net_row(y, "this month:", month, RGB(200, 200, 220));
   y += NET_ROW_H + 4;
+  free(today);
+  free(month);
+  free(rate);
 }
 
 static void on_internet_hover(void) {

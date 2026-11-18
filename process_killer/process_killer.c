@@ -303,11 +303,10 @@ static void pk_split_row(const char *row, char *name, size_t name_len,
 
 static void pk_build_rows(void) {
   for (int i = 0; i < pk_count; i++) {
-    char mem[24];
-    sk_format_bytes((unsigned long long)pk[i].rss_kb * 1024ULL, mem,
-                    sizeof(mem));
-    snprintf(pk_rows[i], PK_ROW_LEN, "%.48s | %.20s | %.1f", pk[i].name, mem,
-             pk[i].cpu);
+    char *mem = sk_format_bytes((unsigned long long)pk[i].rss_kb * 1024ULL);
+    snprintf(pk_rows[i], PK_ROW_LEN, "%.48s | %.20s | %.1f", pk[i].name,
+             mem ? mem : "?", pk[i].cpu);
+    free(mem);
     pk_items[i] = pk_rows[i];
   }
 }

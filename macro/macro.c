@@ -498,14 +498,14 @@ static void record_toggle(void) {
 SKALD_FEATURE_INIT {
   sk_register_hotkey(.hotkey = "Ctrl+Alt+R", .cb = record_toggle);
   sk_register_hotkey(.hotkey = "Ctrl+Alt+P", .cb = PlayMacro);
-  sk_add_to_cc(.display_name = "SaveMacro", .on_action = SaveMacro,
+  sk_add_to_cc(.display_name = "Save Macro", .on_action = SaveMacro,
                .type = "Macro", .icon = "/save.png");
-  sk_add_to_cc(.display_name = "LoadMacro", .on_action = LoadMacro,
+  sk_add_to_cc(.display_name = "Load Macro", .on_action = LoadMacro,
                .type = "Macro", .icon = "/load.png");
-  sk_add_to_cc(.display_name = "InfinitePlayback",
+  sk_add_to_cc(.display_name = "Infinite Playback",
                .on_action = infinite_playback_toggle, .type = "Macro",
                .icon = "/repeat.png");
-  sk_add_to_cc(.display_name = "RemoveDeadTime",
+  sk_add_to_cc(.display_name = "Remove Dead Time",
                .on_action = RemoveDeadTimeToggle, .type = "Macro",
                .icon = "/clock-off.png");
 }

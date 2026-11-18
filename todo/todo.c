@@ -306,9 +306,8 @@ static bool todo_ctrlenter_callback(PromptState *state) {
 
 static void todo_render_callback(PromptState *state) {
   int line_h = FontSize;
-  SkListSpec spec = {.lb = state->lb, .item_height = line_h * 3 + 3};
   sk_place_editbox();
-  if (!sk_listbox_begin(&spec))
+  if (!sk_listbox_begin(.lb = state->lb, .item_height = line_h * 3 + 3))
     return;
   SkListItemCtx ctx;
   while (sk_listbox_next(&ctx)) {

@@ -1,4 +1,4 @@
-name = "clipboard_history"
+name = "window_management"
 description = ""
 
 [provides]

@@ -1260,7 +1260,7 @@ static int typing_test_measure_lines(SkCharPos *pos, int count, const char *txt,
                                      int y, int max_width, int line_height,
                                      int fs) {
   sk_measure_text_wrapped(.x = 0, .y = y, .max_width = max_width,
-                          .line_height = line_height, .fontsize = fs,
+                          .line_height = line_height, .font_size = fs,
                           .text = txt, .out_positions = pos);
   int lines = 0;
   int last_y = -1000000;
@@ -1379,7 +1379,7 @@ static void typing_test_render(PromptState *state) {
       }
       char single[2] = {text[i], '\0'};
       sk_draw_text(.x = positions[i].x + margin, .y = positions[i].y,
-                   .fontsize = body, .align = "Left", .text = single,
+                   .font_size = body, .align = "Left", .text = single,
                    .color = col);
     }
   }
@@ -1410,15 +1410,15 @@ static void typing_test_render(PromptState *state) {
     }
     if (typing_test_wpm[0]) {
       sk_draw_text(.x = W, .y = status_y, .text = typing_test_wpm,
-                   .fontsize = base, .align = "Center");
+                   .font_size = base, .align = "Center");
     }
   }
   sk_draw_text(.x = margin, .y = hints_y, .text = "Press Enter to restart",
-               .fontsize = base, .color = RGB(180, 180, 180), .align = "Left");
+               .font_size = base, .color = RGB(180, 180, 180), .align = "Left");
   sk_draw_text(.x = W - margin, .y = hints_y, .text = "Press Escape to exit",
-               .fontsize = base, .color = RGB(180, 180, 180), .align = "Right");
+               .font_size = base, .color = RGB(180, 180, 180), .align = "Right");
   sk_draw_text(.x = W, .y = title_y, .text = "Typing Speed Test",
-               .fontsize = base, .color = RGB(210, 210, 210),
+               .font_size = base, .color = RGB(210, 210, 210),
                .align = "Center");
 
   free(positions);

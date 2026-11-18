@@ -378,7 +378,7 @@ static void macro_refresh_cache(void) {
       slash = back;
     if (slash)
       *slash = '\0';
-    sk_get_all_files_from_dir(dir, NULL, &macro_load_files, NULL, false, 1);
+    sk_dir_scan(.dir_path = dir, .out = &macro_load_files, .max_depth = 1);
     free(resolved);
   }
 }

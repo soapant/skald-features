@@ -185,7 +185,7 @@ static void draw_usage(const char *label, unsigned long long used,
     free(used_str);
     free(total_str);
   }
-  sk_draw_text(.text = buf, .x = 10, .y = 6, .fontsize = FONTSIZE,
+  sk_draw_text(.text = buf, .x = 10, .y = 6, .font_size = FONTSIZE,
                .color = usage_color(used, total), .align = "LEFT");
 }
 
@@ -207,12 +207,12 @@ static void widgets_cpu_usage_render(SkWidgetState *state) {
   char buf[128];
   if (total == 0) {
     snprintf(buf, sizeof(buf), "CPU Usage:??");
-    sk_draw_text(.text = buf, .x = 10, .y = 6, .fontsize = FONTSIZE,
+    sk_draw_text(.text = buf, .x = 10, .y = 6, .font_size = FONTSIZE,
                  .color = RGB(255, 255, 255), .align = "LEFT");
     return;
   }
   snprintf(buf, sizeof(buf), "CPU Usage:%3llu%%", (used * 100ULL) / total);
-  sk_draw_text(.text = buf, .x = 10, .y = 6, .fontsize = FONTSIZE,
+  sk_draw_text(.text = buf, .x = 10, .y = 6, .font_size = FONTSIZE,
                .color = usage_color(used, total), .align = "LEFT");
 }
 
@@ -225,7 +225,7 @@ static void widgets_date_and_time_render(SkWidgetState *state) {
 
   strftime(buf, sizeof(buf), "%A %B %d %H:%M:%S", tm);
 
-  sk_draw_text(.text = buf, .x = 10, .y = 6, .fontsize = FONTSIZE,
+  sk_draw_text(.text = buf, .x = 10, .y = 6, .font_size = FONTSIZE,
                .color = RGB(220, 220, 220), .align = "LEFT");
 }
 
@@ -388,10 +388,10 @@ static void net_usage_tick(void) {
 
 static void net_row(int y, const char *label, const char *value,
                     unsigned long color) {
-  sk_draw_text(.text = label, .x = NET_PAD, .y = y, .fontsize = FONTSIZE,
+  sk_draw_text(.text = label, .x = NET_PAD, .y = y, .font_size = FONTSIZE,
                .color = color, .align = "LEFT");
   sk_draw_text(.text = value, .x = NET_POPUP_W - NET_PAD, .y = y,
-               .fontsize = FONTSIZE, .color = RGB(235, 235, 245),
+               .font_size = FONTSIZE, .color = RGB(235, 235, 245),
                .align = "RIGHT");
 }
 

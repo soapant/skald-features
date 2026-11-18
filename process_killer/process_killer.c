@@ -373,9 +373,11 @@ static void pk_render_callback(PromptState *state) {
                .align = "LEFT", .color = RGB(130, 130, 160));
   sk_draw_text(.text = "cpu", .x = PK_COL_CPU, .y = 8, .fontsize = 13,
                .align = "LEFT", .color = RGB(130, 130, 160));
+
   char sort_label[64];
   snprintf(sort_label, sizeof(sort_label), "current sort: %s",
            pk_sort_label(pk_sort_mode));
+
   sk_draw_text(.text = sort_label, .x = 880, .y = 8, .fontsize = 13,
                .align = "RIGHT", .color = RGB(160, 160, 190));
 
@@ -397,9 +399,27 @@ static void pk_render_callback(PromptState *state) {
     if (name[0] == '\0')
       continue;
 
+    SkRect r_text = sk_text_bounds(.text = name, .x = ctx.x + 14, .y = ctx.y + 4, .align = "LEFT",
+                             .pad = ctx.x + 14);
+    r_text.color = SK_DARK_GRAY;
+    r_text.radius = 5;
+    r_text.filled=true;
+    ski_draw_rect(&r_text);
     sk_draw_text(.text = name, .x = ctx.x + 14, .y = ctx.y + 4, .align = "LEFT",
                  .pad = ctx.x + 14);
+
+    SkRect r_mem = sk_text_bounds(.text = mem, .x = PK_COL_MEM, .y = ctx.y + 4, .align = "LEFT");
+    r_mem.color = SK_DARK_GRAY;
+    r_mem.radius = 5;
+    r_mem.filled=true;
+    ski_draw_rect(&r_mem);
     sk_draw_text(.text = mem, .x = PK_COL_MEM, .y = ctx.y + 4, .align = "LEFT");
+
+    SkRect r_cpu = sk_text_bounds(.text = cpu, .x = PK_COL_CPU, .y = ctx.y + 4, .align = "LEFT");
+    r_cpu.color = SK_DARK_GRAY;
+    r_cpu.radius = 5;
+    r_cpu.filled=true;
+    ski_draw_rect(&r_cpu);
     sk_draw_text(.text = cpu, .x = PK_COL_CPU, .y = ctx.y + 4, .align = "LEFT");
   }
   sk_listbox_end();

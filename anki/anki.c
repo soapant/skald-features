@@ -528,7 +528,7 @@ static bool should_swallow_anki(void) {
 
 SKALD_FEATURE_INIT {
   srand((time(NULL)));
-  // sk_run_every(time_between_qs, print_due_card);
+  sk_run_every(time_between_qs, print_due_card);
   sk_register_hotkey(.hotkey = "Shift+Space", .cb = handle_anki,
                      .should_swallow = should_swallow_anki);
 }

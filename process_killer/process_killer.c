@@ -398,7 +398,7 @@ static void pk_render_callback(PromptState *state) {
     SkRect r_text =
         sk_text_bounds(.text = name, .x = ctx.x + 14, .y = ctx.y + 4,
                        .align = "LEFT", .pad = ctx.x + 14);
-    r_text.color = SK_DARK_GRAY;
+    r_text.color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
     r_text.radius = 5;
     r_text.filled = true;
     ski_draw_rect(&r_text);
@@ -407,7 +407,7 @@ static void pk_render_callback(PromptState *state) {
 
     SkRect r_mem = sk_text_bounds(.text = mem, .x = PK_COL_MEM, .y = ctx.y + 4,
                                   .align = "LEFT");
-    r_mem.color = SK_DARK_GRAY;
+    r_mem.color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
     r_mem.radius = 5;
     r_mem.filled = true;
     ski_draw_rect(&r_mem);
@@ -415,7 +415,7 @@ static void pk_render_callback(PromptState *state) {
 
     SkRect r_cpu = sk_text_bounds(.text = cpu, .x = PK_COL_CPU, .y = ctx.y + 4,
                                   .align = "LEFT");
-    r_cpu.color = SK_DARK_GRAY;
+    r_cpu.color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
     r_cpu.radius = 5;
     r_cpu.filled = true;
     ski_draw_rect(&r_cpu);

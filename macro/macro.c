@@ -382,17 +382,20 @@ static void macro_refresh_cache(void) {
     free(resolved);
   }
 }
-
-static void macro_refresh(PromptState *state) {
+static void init_macros(void) {
   macro_refresh_cache();
   int n = (int)macro_load_files.count;
   if (n > MAX_VISIBLE_ITEMS)
     n = MAX_VISIBLE_ITEMS;
   for (int i = 0; i < n; i++) {
     macro_file_name_ptrs[i] = macro_load_files.files[i].name;
-    sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
-                        .items = macro_file_name_ptrs, .count = n);
   }
+}
+
+
+static void macro_refresh(PromptState *state) {
+  sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
+                      .items = macro_file_name_ptrs, .count = macro_load_files.count);
 }
 
 static bool macro_load_enter(PromptState *state) {
@@ -461,23 +464,13 @@ static void PlayMacro(void) {
 }
 
 static void infinite_playback_toggle(void) {
-  macro_infinite = !macro_infinite;
-  if (macro_infinite)
-    sk_message(.message = "Infinite playback enabled", .timeout = 1.0,
-               .slot = BOTTOM_CENTER);
-  else
-    sk_message(.message = "Infinite playback disabled", .timeout = 1.0,
-               .slot = BOTTOM_CENTER);
+  if (sk_checkbox_is_clicked("Infinite Playback")) macro_infinite = true;
+  else macro_infinite = false;
 }
 
-static void RemoveDeadTimeToggle(void) {
-  macro_remove_dead = !macro_remove_dead;
-  if (macro_remove_dead)
-    sk_message(.message = "Remove dead time enabled", .timeout = 1.0,
-               .slot = BOTTOM_CENTER);
-  else
-    sk_message(.message = "Remove dead time disabled", .timeout = 1.0,
-               .slot = BOTTOM_CENTER);
+static void remove_dead_time_toggle(void) {
+  if (sk_checkbox_is_clicked("Remove Dead Time")) macro_infinite = true;
+  else macro_infinite = false;
 }
 
 static void record_toggle(void) {
@@ -495,7 +488,9 @@ static void record_toggle(void) {
   recording = false;
 }
 
+
 SKALD_FEATURE_INIT {
+  init_macros();
   sk_register_hotkey(.hotkey = "Ctrl+Alt+R", .cb = record_toggle);
   sk_register_hotkey(.hotkey = "Ctrl+Alt+P", .cb = PlayMacro);
   sk_add_to_cc(.display_name = "Save Macro", .on_action = SaveMacro,
@@ -506,6 +501,25 @@ SKALD_FEATURE_INIT {
                .on_action = infinite_playback_toggle, .type = "Macro",
                .icon = "/repeat.png");
   sk_add_to_cc(.display_name = "Remove Dead Time",
-               .on_action = RemoveDeadTimeToggle, .type = "Macro",
+               .on_action = remove_dead_time_toggle, .type = "Macro",
                .icon = "/clock-off.png");
+
+  SkSettingsEntry *macro =
+      sk_add_settings_entry(.name = "Macro", .icon = "/save.png",
+                            .desc = "Configure Macro Settings");
+
+  sk_settings_entry_add_checkbox(macro,
+                                 .title = "Infinite Playback",
+                                 .sub = "Toggle infinite playback",
+                                 .on_click=infinite_playback_toggle);
+
+  sk_settings_entry_add_checkbox(macro,
+                                 .title = "Remove Dead Time",
+                                 .sub = "Toggle removal of dead time (more than 250ms by default)",
+                                 .on_click=remove_dead_time_toggle);
+  sk_settings_entry_add_dropdown(macro,
+                                 .title = "Current Macro In Use",
+                                 .sub = "The current macro that the playback will use",
+                                 .options = macro_file_name_ptrs,
+                                 .option_count=macro_load_files.count);
 }

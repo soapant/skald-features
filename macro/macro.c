@@ -10,6 +10,7 @@ static SkThread thread = NULL;
 #define HEIGHT sk_get_screen_height()
 
 #define MACRO_MAX_EVENTS 32768 * 2
+#define DEAD_TIME_LIMIT 250.0
 
 #define MACRO_RECORD_VK 'R'
 #define MACRO_PLAY_VK 'P'
@@ -175,9 +176,6 @@ static void reset_recording(void) {
 
 static bool playing = false;
 static SkThread play_thread = NULL;
-static bool macro_infinite = false;
-static bool macro_remove_dead = false;
-
 #define MACRO_MAX_HELD 64
 static int held_keys[MACRO_MAX_HELD];
 static int held_count = 0;
@@ -239,7 +237,8 @@ static void *playback_loop(void *arg) {
       double target_ms = (double)(m->t_us - t0) / 1000.0;
       double cur_ms = sk_end_timer(start);
       double wait_ms = target_ms - cur_ms;
-      if (macro_remove_dead && wait_ms > 500.0)
+      if (sk_config_get_setting_bool("Macro.Remove Dead Time") &&
+          wait_ms > DEAD_TIME_LIMIT)
         wait_ms = 0.0;
       if (wait_ms > 0.0)
         sk_sleep(wait_ms / 1000.0);
@@ -264,7 +263,7 @@ static void *playback_loop(void *arg) {
       }
     }
     release_everything();
-    if (playing && macro_infinite)
+    if (playing && sk_config_get_setting_bool("Macro.Infinite Playback"))
       continue;
     break;
   }
@@ -392,10 +391,10 @@ static void init_macros(void) {
   }
 }
 
-
 static void macro_refresh(PromptState *state) {
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
-                      .items = macro_file_name_ptrs, .count = macro_load_files.count);
+                      .items = macro_file_name_ptrs,
+                      .count = macro_load_files.count);
 }
 
 static bool macro_load_enter(PromptState *state) {
@@ -463,14 +462,17 @@ static void PlayMacro(void) {
   release_everything();
 }
 
+static void macro_toggle_setting(const char *key) {
+  sk_config_set_setting(key,
+                        sk_config_get_setting_bool(key) ? "false" : "true");
+}
+
 static void infinite_playback_toggle(void) {
-  if (sk_checkbox_is_clicked("Infinite Playback")) macro_infinite = true;
-  else macro_infinite = false;
+  macro_toggle_setting("Macro.Infinite Playback");
 }
 
 static void remove_dead_time_toggle(void) {
-  if (sk_checkbox_is_clicked("Remove Dead Time")) macro_infinite = true;
-  else macro_infinite = false;
+  macro_toggle_setting("Macro.Remove Dead Time");
 }
 
 static void record_toggle(void) {
@@ -519,18 +521,17 @@ SKALD_FEATURE_INIT {
       sk_add_settings_entry(.name = "Macro", .icon = "/save.png",
                             .desc = "Configure Macro Settings");
 
-  sk_settings_entry_add_checkbox(macro,
-                                 .title = "Infinite Playback",
-                                 .sub = "Toggle infinite playback",
-                                 .on_click=infinite_playback_toggle);
+  sk_settings_entry_add_checkbox(macro, .title = "Infinite Playback",
+                                 .sub = "Toggle infinite playback");
 
-  sk_settings_entry_add_checkbox(macro,
-                                 .title = "Remove Dead Time",
-                                 .sub = "Toggle removal of dead time (more than 250ms by default)",
-                                 .on_click=remove_dead_time_toggle);
-  sk_settings_entry_add_dropdown(macro,
-                                 .title = "Current Macro In Use",
-                                 .sub = "The current macro that the playback will use",
-                                 .refresh_options = macro_refresh_options,
-                                 .on_select = macro_select_current);
+  sk_settings_entry_add_checkbox(
+      macro, .title = "Remove Dead Time",
+      .sub = "Toggle removal of dead time (more than 250ms by default)");
+
+
+  sk_settings_entry_add_dropdown(
+      macro, .title = "Current Macro In Use",
+      .sub = "The current macro that the playback will use",
+      .refresh_options = macro_refresh_options,
+      .on_select = macro_select_current);
 }

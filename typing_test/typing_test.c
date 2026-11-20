@@ -1416,7 +1416,8 @@ static void typing_test_render(PromptState *state) {
   sk_draw_text(.x = margin, .y = hints_y, .text = "Press Enter to restart",
                .font_size = base, .color = RGB(180, 180, 180), .align = "Left");
   sk_draw_text(.x = W - margin, .y = hints_y, .text = "Press Escape to exit",
-               .font_size = base, .color = RGB(180, 180, 180), .align = "Right");
+               .font_size = base, .color = RGB(180, 180, 180),
+               .align = "Right");
   sk_draw_text(.x = W, .y = title_y, .text = "Typing Speed Test",
                .font_size = base, .color = RGB(210, 210, 210),
                .align = "Center");

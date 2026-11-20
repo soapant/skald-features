@@ -489,18 +489,20 @@ static void vim_move(int amount, bool up) {
   PromptState *ps = sk_get_active_prompt();
   if (!ps || !ps->lb)
     return;
-  if (sk_focus_kind() != SK_FOCUS_LISTBOX) {
-    if (up) sk_focus_move_dir(SK_FOCUS_UP);
-    else sk_focus_move_dir(SK_FOCUS_DOWN);
+  SkFocusKind kind = sk_focus_kind();
+  bool widget = kind == SK_FOCUS_BUTTON || kind == SK_FOCUS_CHECKBOX ||
+                kind == SK_FOCUS_SLIDER || kind == SK_FOCUS_CUSTOM;
+  if (widget) {
+    if (up)
+      sk_focus_move_dir(SK_FOCUS_UP);
+    else
+      sk_focus_move_dir(SK_FOCUS_DOWN);
     return;
   }
 
   if (up) {
-    if (ps->lb->selected_index >= amount) {
-      ps->lb->selected_index -= amount;
-    } else {
-      ps->lb->selected_index = 0;
-    }
+    int next = ps->lb->selected_index - amount;
+    ps->lb->selected_index = next < 0 ? -1 : next;
   } else {
     int max_index = ps->lb->item_count - 1;
     if (max_index < 0)
@@ -583,7 +585,8 @@ static void vim_move_left(void) {
 
 static void vim_move_right(void) {
   PromptState *ps = sk_get_active_prompt();
-  if (ps->eb->cursor < strlen(ps->eb->filter) && sk_focus_kind() == SK_FOCUS_LISTBOX) {
+  if (ps->eb->cursor < strlen(ps->eb->filter) &&
+      sk_focus_kind() == SK_FOCUS_LISTBOX) {
     ps->eb->cursor++;
   } else {
     sk_focus_move_dir(SK_FOCUS_RIGHT);

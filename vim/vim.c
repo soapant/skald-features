@@ -489,6 +489,11 @@ static void vim_move(int amount, bool up) {
   PromptState *ps = sk_get_active_prompt();
   if (!ps || !ps->lb)
     return;
+  if (sk_focus_kind() != SK_FOCUS_LISTBOX) {
+    if (up) sk_focus_move_dir(SK_FOCUS_UP);
+    else sk_focus_move_dir(SK_FOCUS_DOWN);
+    return;
+  }
 
   if (up) {
     if (ps->lb->selected_index >= amount) {
@@ -569,14 +574,19 @@ static void vim_move_left(void) {
   PromptState *ps = sk_get_active_prompt();
   if (!ps || !ps->eb)
     return;
-  if (ps->eb->cursor > 0)
+  if (ps->eb->cursor > 0 && sk_focus_kind() == SK_FOCUS_LISTBOX) {
     ps->eb->cursor--;
+  } else {
+    sk_focus_move_dir(SK_FOCUS_LEFT);
+  }
 }
 
 static void vim_move_right(void) {
   PromptState *ps = sk_get_active_prompt();
-  if (ps->eb->cursor < strlen(ps->eb->filter)) {
+  if (ps->eb->cursor < strlen(ps->eb->filter) && sk_focus_kind() == SK_FOCUS_LISTBOX) {
     ps->eb->cursor++;
+  } else {
+    sk_focus_move_dir(SK_FOCUS_RIGHT);
   }
 }
 static void vim_delete_line(void) {

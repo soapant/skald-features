@@ -488,6 +488,17 @@ static void record_toggle(void) {
   recording = false;
 }
 
+static int macro_refresh_options(const char ***out_options) {
+  *out_options = macro_file_name_ptrs;
+  return (int)macro_load_files.count;
+}
+
+static void macro_select_current(const char *option, int index, void *ud) {
+  (void)index;
+  (void)ud;
+  if (option)
+    macro_load(option);
+}
 
 SKALD_FEATURE_INIT {
   init_macros();
@@ -520,6 +531,6 @@ SKALD_FEATURE_INIT {
   sk_settings_entry_add_dropdown(macro,
                                  .title = "Current Macro In Use",
                                  .sub = "The current macro that the playback will use",
-                                 .options = macro_file_name_ptrs,
-                                 .option_count=macro_load_files.count);
+                                 .refresh_options = macro_refresh_options,
+                                 .on_select = macro_select_current);
 }

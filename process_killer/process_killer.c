@@ -352,7 +352,7 @@ static bool pk_enter_callback(PromptState *state) {
 static void pk_refresh_callback(PromptState *state) {
   pk_last_collect = sk_start_timer();
   pk_collect_started = true;
-  pk_collect_and_sort();
+ pk_collect_and_sort();
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
                       .items = pk_items, .count = pk_count);
 }

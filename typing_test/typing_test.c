@@ -22,6 +22,15 @@ static char typing_test_wpm[100] = {0};
 static char *text = "";
 
 static int typing_test_word_count = 30;
+static char s_word_count_buf[16] = "30";
+
+static int typing_test_parse_int(const char *text, int fallback) {
+  if (!text || !text[0])
+    return fallback;
+  char *end = NULL;
+  long n = strtol(text, &end, 10);
+  return (end && *end == '\0') ? (int)n : fallback;
+}
 
 static char *typing_test_get_random_text(int word_count) {
   static const char *words[] = {
@@ -1430,9 +1439,46 @@ static void trigger_typing_test(void) {
             .on_close = typing_test_reset);
 }
 
+static void typing_test_word_count_change(const char *field,
+                                          const char *value) {
+  (void)field;
+  int n = typing_test_parse_int(value, typing_test_word_count);
+  if (n < 1)
+    n = 1;
+  if (n > 150)
+    n = 150;
+  typing_test_word_count = n;
+  snprintf(s_word_count_buf, sizeof(s_word_count_buf), "%d", n);
+  sk_config_set_setting("TypingTest.WordCount", s_word_count_buf);
+}
+
 SKALD_FEATURE_INIT {
+  char *saved = sk_config_get_setting("TypingTest.WordCount");
+  typing_test_word_count = typing_test_parse_int(saved, 30);
+  free(saved);
+  if (typing_test_word_count < 1)
+    typing_test_word_count = 1;
+  if (typing_test_word_count > 150)
+    typing_test_word_count = 150;
+  snprintf(s_word_count_buf, sizeof(s_word_count_buf), "%d",
+           typing_test_word_count);
+
   text = typing_test_get_random_text(typing_test_word_count);
   sk_register_hotkey(.hotkey = "Alt+B", .cb = trigger_typing_test);
   sk_add_feature(.display_name = "Typing Test",
                  .on_action = trigger_typing_test, .icon = "/keyboard.png");
+
+  SkSettingsEntry *entry = sk_add_settings_entry(
+      .name = "Typing Test", .icon = "/keyboard.png",
+      .desc = "Typing test length and scoring.");
+  SkSettingsEditboxField field = {.name = "word_count",
+                                   .label = "Words:",
+                                   .buffer = s_word_count_buf,
+                                   .buffer_size = sizeof(s_word_count_buf),
+                                   .width = 70};
+  sk_settings_entry_add_editbox(entry, .title = "Words Per Test",
+                                .sub = "Number of words in each test.",
+                                .fields = &field, .field_count = 1,
+
+                                .on_change = typing_test_word_count_change);
 }

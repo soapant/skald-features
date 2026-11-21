@@ -22,6 +22,24 @@ typedef struct {
 static pk_proc pk[PK_MAX];
 static int pk_count = 0;
 static int pk_sort_mode = 0;
+static double s_refresh_ms = 1000.0;
+static char s_refresh_buf[16] = "1000";
+static int s_sort_buf = 0;
+
+static int pk_parse_int(const char *text, int fallback) {
+  if (!text || !text[0])
+    return fallback;
+  char *end = NULL;
+  long n = strtol(text, &end, 10);
+  return (end && *end == '\0') ? (int)n : fallback;
+}
+
+static int pk_setting_int(const char *key, int fallback) {
+  char *v = sk_config_get_setting(key);
+  int out = pk_parse_int(v, fallback);
+  free(v);
+  return out;
+}
 static SkTimer pk_last_collect;
 static bool pk_collect_started = false;
 static char pk_rows[PK_MAX][PK_ROW_LEN];
@@ -351,7 +369,7 @@ static void pk_render_callback(PromptState *state) {
   if (!state)
     return;
   double since = pk_collect_started ? sk_end_timer(pk_last_collect) : 1e9;
-  if (since >= 1000.0) {
+  if (since >= s_refresh_ms) {
     pk_last_collect = sk_start_timer();
     pk_collect_started = true;
     int keep = state->lb->selected_index;
@@ -430,8 +448,67 @@ static void trigger_process_killer(void) {
             .enter = pk_enter_callback, .render = pk_render_callback);
 }
 
+static void pk_refresh_change(const char *field, const char *value) {
+  (void)field;
+  int n = pk_parse_int(value, (int)s_refresh_ms);
+  if (n < 100)
+    n = 100;
+  s_refresh_ms = (double)n;
+  snprintf(s_refresh_buf, sizeof(s_refresh_buf), "%d", n);
+  sk_config_set_setting("ProcessKiller.RefreshMs", s_refresh_buf);
+}
+
+static const char *s_sort_options[] = {"memory", "cpu", "name"};
+
+static int pk_sort_options(const char ***out_options) {
+  *out_options = s_sort_options;
+  return PK_SORT_MODES;
+}
+
+static void pk_sort_select(const char *option, int index, void *ud) {
+  (void)option;
+  (void)ud;
+  if (index < 0 || index >= PK_SORT_MODES)
+    return;
+  pk_sort_mode = index;
+  s_sort_buf = index;
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%d", index);
+  sk_config_set_setting("ProcessKiller.DefaultSort", buf);
+}
+
 SKALD_FEATURE_INIT {
+  int refresh = pk_setting_int("ProcessKiller.RefreshMs", 1000);
+  if (refresh < 100)
+    refresh = 100;
+  s_refresh_ms = (double)refresh;
+  snprintf(s_refresh_buf, sizeof(s_refresh_buf), "%d", refresh);
+
+  pk_sort_mode = pk_setting_int("ProcessKiller.DefaultSort", 0);
+  if (pk_sort_mode < 0 || pk_sort_mode >= PK_SORT_MODES)
+    pk_sort_mode = 0;
+  s_sort_buf = pk_sort_mode;
+
   sk_register_hotkey(.hotkey = "Alt+U", .cb = trigger_process_killer);
   sk_add_feature(.display_name = "Process Killer",
                  .on_action = trigger_process_killer, .icon = "/skull.png");
+
+  SkSettingsEntry *entry = sk_add_settings_entry(
+      .name = "Process Killer", .icon = "/skull.png",
+      .desc = "Process list refresh and sorting.");
+  SkSettingsEditboxField field = {.name = "refresh_ms",
+                                   .label = "ms:",
+                                   .buffer = s_refresh_buf,
+                                   .buffer_size = sizeof(s_refresh_buf),
+                                   .width = 70};
+  sk_settings_entry_add_editbox(entry, .title = "Refresh Interval",
+                                .sub = "How often the process list updates.",
+                                .fields = &field, .field_count = 1,
+
+                                .on_change = pk_refresh_change);
+  sk_settings_entry_add_dropdown(entry, .title = "Default Sort",
+                                 .sub = "Sort order when the list opens.",
+                                 .refresh_options = pk_sort_options,
+                                 .initial = s_sort_buf,
+                                 .on_select = pk_sort_select);
 }

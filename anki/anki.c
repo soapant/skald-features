@@ -57,32 +57,6 @@ static int (*p_sqlite3_bind_text)(sqlite3_stmt *, int, const char *, int,
 static int (*p_sqlite3_close)(sqlite3 *) = NULL;
 static int (*p_sqlite3_bind_int64)(sqlite3_stmt *, int, sqlite3_int64) = NULL;
 
-static int time_between_qs = 10;
-static char s_deck[128] = "Chemistry";
-static char s_interval[32] = "10";
-
-static void anki_load_str(const char *key, const char *fallback, char *out,
-                          size_t cap) {
-  char *v = sk_config_get_setting(key);
-  snprintf(out, cap, "%s", (v && v[0]) ? v : (fallback ? fallback : ""));
-  free(v);
-}
-
-static int anki_parse_int(const char *text, int fallback) {
-  if (!text || !text[0])
-    return fallback;
-  char *end = NULL;
-  long n = strtol(text, &end, 10);
-  return (end && *end == '\0') ? (int)n : fallback;
-}
-
-static int anki_setting_int(const char *key, int fallback) {
-  char *v = sk_config_get_setting(key);
-  int out = anki_parse_int(v, fallback);
-  free(v);
-  return out;
-}
-
 static char *safe_strdup(const char *s) {
   if (!s)
     return NULL;
@@ -504,7 +478,9 @@ static void print_due_card(void) {
   snprintf(buf, sizeof(buf), "%s/.local/share/Anki2/User 1/collection.anki2",
            sk_resolve_user_path());
 #endif
-  CardList list = get_cards_in_deck(buf, s_deck);
+  char deck[128];
+  sk_config_get_setting_string("Anki.Deck", deck, sizeof(deck), "Chemistry");
+  CardList list = get_cards_in_deck(buf, deck);
   long long now = (long long)time(NULL);
   size_t *due = malloc(list.count * sizeof(size_t));
   size_t due_count = 0;
@@ -548,54 +524,30 @@ static bool should_swallow_anki(void) {
   return active;
 }
 
-static void anki_deck_change(const char *field, const char *value) {
-  (void)field;
-  if (!value)
-    return;
-  snprintf(s_deck, sizeof(s_deck), "%s", value);
-  sk_config_set_setting("Anki.Deck", s_deck);
-}
-
-static void anki_interval_change(const char *field, const char *value) {
-  (void)field;
-  int n = anki_parse_int(value, time_between_qs);
-  if (n < 1)
-    n = 1;
-  time_between_qs = n;
-  snprintf(s_interval, sizeof(s_interval), "%d", n);
-  sk_config_set_setting("Anki.Interval", s_interval);
-}
-
 SKALD_FEATURE_INIT {
   srand((time(NULL)));
-  anki_load_str("Anki.Deck", "Chemistry", s_deck, sizeof(s_deck));
-  time_between_qs = anki_setting_int("Anki.Interval", 10);
-  if (time_between_qs < 1)
-    time_between_qs = 1;
-  snprintf(s_interval, sizeof(s_interval), "%d", time_between_qs);
-  // sk_run_every(time_between_qs, print_due_card);
   sk_register_hotkey(.hotkey = "Shift+Space", .cb = handle_anki,
                      .should_swallow = should_swallow_anki);
 
-  SkSettingsEntry *entry = sk_add_settings_entry(
-      .name = "Anki", .icon = "/anki.png",
-      .desc = "Anki deck and review settings.");
+  SkSettingsEntry *entry =
+      sk_add_settings_entry(.name = "Anki", .icon = "/anki.png",
+                            .desc = "Anki deck and review settings.");
   SkSettingsEditboxField deck_field = {.name = "deck",
-                                        .label = "Deck:",
-                                        .buffer = s_deck,
-                                        .buffer_size = sizeof(s_deck)};
+                                       .label = "Deck:",
+                                       .config_key = "Anki.Deck",
+                                       .default_value = "Chemistry",
+                                       .type = SK_SETTINGS_EDITBOX_STRING};
   sk_settings_entry_add_editbox(entry, .title = "Deck Name",
                                 .sub = "Anki deck to read due cards from.",
-                                .fields = &deck_field, .field_count = 1,
-
-                                .on_change = anki_deck_change);
+                                .fields = &deck_field, .field_count = 1);
   SkSettingsEditboxField interval_field = {.name = "interval",
                                            .label = "Seconds:",
-                                           .buffer = s_interval,
-                                           .buffer_size = sizeof(s_interval)};
+                                           .config_key = "Anki.Interval",
+                                           .default_value = "10",
+                                           .type = SK_SETTINGS_EDITBOX_INT,
+                                           .min_value = 1.0f};
   sk_settings_entry_add_editbox(entry, .title = "Auto-Show Interval",
-                                .sub = "Seconds between automatic card prompts.",
-                                .fields = &interval_field, .field_count = 1,
-
-                                .on_change = anki_interval_change);
+                                .sub =
+                                    "Seconds between automatic card prompts.",
+                                .fields = &interval_field, .field_count = 1);
 }

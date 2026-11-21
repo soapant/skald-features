@@ -495,9 +495,8 @@ static int macro_refresh_options(const char ***out_options) {
   return (int)macro_load_files.count;
 }
 
-static void macro_select_current(const char *option, int index, void *ud) {
+static void macro_select_current(const char *option, int index) {
   (void)index;
-  (void)ud;
   if (option)
     macro_load(option);
 }
@@ -527,7 +526,6 @@ SKALD_FEATURE_INIT {
   sk_settings_entry_add_checkbox(
       macro, .title = "Remove Dead Time",
       .sub = "Toggle removal of dead time (more than 250ms by default)");
-
 
   sk_settings_entry_add_dropdown(
       macro, .title = "Current Macro In Use",

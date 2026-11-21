@@ -15,31 +15,7 @@
 
 static int s_widget_fps = 1;
 static int s_widget_font_size = 14;
-static char s_fps_buf[16] = "1";
-static char s_font_buf[16] = "14";
-static char s_net_buf[24] = "500";
 static double s_net_sample_interval_ms = 500.0;
-
-static int widgets_parse_int(const char *text, int fallback) {
-  if (!text || !text[0])
-    return fallback;
-  char *end = NULL;
-  long n = strtol(text, &end, 10);
-  return (end && *end == '\0') ? (int)n : fallback;
-}
-
-static int widgets_setting_int(const char *key, int fallback) {
-  char *v = sk_config_get_setting(key);
-  int out = widgets_parse_int(v, fallback);
-  free(v);
-  return out;
-}
-
-static double widgets_setting_double(const char *key, double fallback) {
-  if (!sk_config_has_setting(key))
-    return fallback;
-  return (double)sk_config_get_setting_float(key);
-}
 
 static bool read_disk(unsigned long long *used_out,
                       unsigned long long *total_out) {
@@ -390,8 +366,6 @@ static void net_usage_sample(void) {
   net_last_sample = sk_start_timer();
 }
 
-
-
 static SkTimer net_last_tick;
 
 static void net_usage_tick(void) {
@@ -414,8 +388,9 @@ static void net_usage_tick(void) {
 
 static void net_row(int y, const char *label, const char *value,
                     unsigned long color) {
-  sk_draw_text(.text = label, .x = NET_PAD, .y = y, .font_size = s_widget_font_size,
-               .color = color, .align = "LEFT");
+  sk_draw_text(.text = label, .x = NET_PAD, .y = y,
+               .font_size = s_widget_font_size, .color = color,
+               .align = "LEFT");
   sk_draw_text(.text = value, .x = NET_POPUP_W - NET_PAD, .y = y,
                .font_size = s_widget_font_size, .color = RGB(235, 235, 245),
                .align = "RIGHT");
@@ -448,50 +423,42 @@ static void on_internet_hover(void) {
 
 static void widgets_fps_change(const char *field, const char *value) {
   (void)field;
-  int n = widgets_parse_int(value, s_widget_fps);
-  if (n < 1)
-    n = 1;
-  s_widget_fps = n;
-  snprintf(s_fps_buf, sizeof(s_fps_buf), "%d", n);
-  sk_config_set_setting("Widgets.FPS", s_fps_buf);
+  (void)value;
+  s_widget_fps = sk_config_get_setting_int("Widgets.FPS", 1);
+  if (s_widget_fps < 1)
+    s_widget_fps = 1;
 }
 
 static void widgets_font_change(const char *field, const char *value) {
   (void)field;
-  int n = widgets_parse_int(value, s_widget_font_size);
-  if (n < 6)
-    n = 6;
-  s_widget_font_size = n;
-  snprintf(s_font_buf, sizeof(s_font_buf), "%d", n);
-  sk_config_set_setting("Widgets.FontSize", s_font_buf);
+  (void)value;
+  s_widget_font_size = sk_config_get_setting_int("Widgets.FontSize", 14);
+  if (s_widget_font_size < 6)
+    s_widget_font_size = 6;
 }
 
 static void widgets_net_change(const char *field, const char *value) {
   (void)field;
-  int n = widgets_parse_int(value, (int)s_net_sample_interval_ms);
-  if (n < 50)
-    n = 50;
-  s_net_sample_interval_ms = (double)n;
-  snprintf(s_net_buf, sizeof(s_net_buf), "%d", n);
-  sk_config_set_setting("Widgets.NetSampleMs", s_net_buf);
+  (void)value;
+  s_net_sample_interval_ms =
+      (double)sk_config_get_setting_int("Widgets.NetSampleMs", 500);
+  if (s_net_sample_interval_ms < 50.0)
+    s_net_sample_interval_ms = 50.0;
 }
 
 SKALD_FEATURE_INIT {
-  s_widget_fps = widgets_setting_int("Widgets.FPS", 1);
+  s_widget_fps = sk_config_get_setting_int("Widgets.FPS", 1);
   if (s_widget_fps < 1)
     s_widget_fps = 1;
-  snprintf(s_fps_buf, sizeof(s_fps_buf), "%d", s_widget_fps);
 
-  s_widget_font_size = widgets_setting_int("Widgets.FontSize", 14);
+  s_widget_font_size = sk_config_get_setting_int("Widgets.FontSize", 14);
   if (s_widget_font_size < 6)
     s_widget_font_size = 6;
-  snprintf(s_font_buf, sizeof(s_font_buf), "%d", s_widget_font_size);
 
   s_net_sample_interval_ms =
-      widgets_setting_double("Widgets.NetSampleMs", 500.0);
+      (double)sk_config_get_setting_float_or("Widgets.NetSampleMs", 500.0f);
   if (s_net_sample_interval_ms < 50.0)
     s_net_sample_interval_ms = 50.0;
-  snprintf(s_net_buf, sizeof(s_net_buf), "%.0f", s_net_sample_interval_ms);
 
   disk = sk_widget(.name = "disk_usage", .fps = s_widget_fps, .no_bg = NO_BG,
                    .slot = WIDGET_SLOT_BOTTOM_LEFT,
@@ -514,34 +481,37 @@ SKALD_FEATURE_INIT {
                 .on_hover = on_internet_hover, .slot = WIDGET_SLOT_BOTTOM_RIGHT,
                 .render = widgets_internet_render);
 
-  SkSettingsEntry *entry = sk_add_settings_entry(
-      .name = "Widgets", .icon = "/widgets.png",
-      .desc = "Desktop widget refresh and appearance.");
+  SkSettingsEntry *entry =
+      sk_add_settings_entry(.name = "Widgets", .icon = "/widgets.png",
+                            .desc = "Desktop widget refresh and appearance.");
   SkSettingsEditboxField fps_field = {.name = "fps",
-                                       .label = "FPS:",
-                                       .buffer = s_fps_buf,
-                                       .buffer_size = sizeof(s_fps_buf)};
+                                      .label = "FPS:",
+                                      .config_key = "Widgets.FPS",
+                                      .default_value = "1",
+                                      .type = SK_SETTINGS_EDITBOX_INT,
+                                      .min_value = 1.0f};
   sk_settings_entry_add_editbox(entry, .title = "Refresh FPS",
                                 .sub = "Widget refresh rate; restarts widgets.",
                                 .fields = &fps_field, .field_count = 1,
-
                                 .on_change = widgets_fps_change);
   SkSettingsEditboxField font_field = {.name = "font_size",
-                                        .label = "Size:",
-                                        .buffer = s_font_buf,
-                                        .buffer_size = sizeof(s_font_buf)};
+                                       .label = "Size:",
+                                       .config_key = "Widgets.FontSize",
+                                       .default_value = "14",
+                                       .type = SK_SETTINGS_EDITBOX_INT,
+                                       .min_value = 6.0f};
   sk_settings_entry_add_editbox(entry, .title = "Font Size",
                                 .sub = "Font size used by widget text.",
                                 .fields = &font_field, .field_count = 1,
-
                                 .on_change = widgets_font_change);
   SkSettingsEditboxField net_field = {.name = "net_ms",
-                                       .label = "ms:",
-                                       .buffer = s_net_buf,
-                                       .buffer_size = sizeof(s_net_buf)};
+                                      .label = "ms:",
+                                      .config_key = "Widgets.NetSampleMs",
+                                      .default_value = "500",
+                                      .type = SK_SETTINGS_EDITBOX_FLOAT,
+                                      .min_value = 50.0f};
   sk_settings_entry_add_editbox(entry, .title = "Network Sample Interval",
                                 .sub = "How often network usage is sampled.",
                                 .fields = &net_field, .field_count = 1,
-
                                 .on_change = widgets_net_change);
 }

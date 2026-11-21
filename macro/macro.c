@@ -525,7 +525,7 @@ SKALD_FEATURE_INIT {
 
   sk_settings_entry_add_checkbox(
       macro, .title = "Remove Dead Time",
-      .sub = "Toggle removal of dead time (more than 250ms by default)");
+     .sub = "Toggle removal of dead time (more than 250ms by default)");
 
   sk_settings_entry_add_dropdown(
       macro, .title = "Current Macro In Use",

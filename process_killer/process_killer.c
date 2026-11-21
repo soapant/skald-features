@@ -359,6 +359,8 @@ static void pk_refresh_callback(PromptState *state) {
 
 #define PK_COL_MEM 430
 #define PK_COL_CPU 600
+#define PK_RECT_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
+
 
 static void pk_render_callback(PromptState *state) {
   if (!state)
@@ -368,7 +370,6 @@ static void pk_render_callback(PromptState *state) {
     pk_last_collect = sk_start_timer();
     pk_collect_started = true;
     int keep = state->lb->selected_index;
-    pk_collect_and_sort();
     sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
                         .items = pk_items, .count = pk_count);
     if (keep >= 0 && keep < state->lb->item_count) {
@@ -411,7 +412,7 @@ static void pk_render_callback(PromptState *state) {
     SkRect r_text =
         sk_text_bounds(.text = name, .x = ctx.x + 14, .y = ctx.y + 4,
                        .align = "LEFT", .pad = ctx.x + 14);
-    r_text.color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
+    r_text.color = PK_RECT_COLOR;
     r_text.radius = 5;
     r_text.filled = true;
     ski_draw_rect(&r_text);
@@ -420,7 +421,7 @@ static void pk_render_callback(PromptState *state) {
 
     SkRect r_mem = sk_text_bounds(.text = mem, .x = PK_COL_MEM, .y = ctx.y + 4,
                                   .align = "LEFT");
-    r_mem.color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
+    r_mem.color = PK_RECT_COLOR;
     r_mem.radius = 5;
     r_mem.filled = true;
     ski_draw_rect(&r_mem);
@@ -428,7 +429,7 @@ static void pk_render_callback(PromptState *state) {
 
     SkRect r_cpu = sk_text_bounds(.text = cpu, .x = PK_COL_CPU, .y = ctx.y + 4,
                                   .align = "LEFT");
-    r_cpu.color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f);
+    r_cpu.color = PK_RECT_COLOR;
     r_cpu.radius = 5;
     r_cpu.filled = true;
     ski_draw_rect(&r_cpu);

@@ -499,8 +499,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField field = {.name = "refresh_ms",
                                    .label = "ms:",
                                    .buffer = s_refresh_buf,
-                                   .buffer_size = sizeof(s_refresh_buf),
-                                   .width = 70};
+                                   .buffer_size = sizeof(s_refresh_buf)};
   sk_settings_entry_add_editbox(entry, .title = "Refresh Interval",
                                 .sub = "How often the process list updates.",
                                 .fields = &field, .field_count = 1,

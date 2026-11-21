@@ -520,8 +520,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField fps_field = {.name = "fps",
                                        .label = "FPS:",
                                        .buffer = s_fps_buf,
-                                       .buffer_size = sizeof(s_fps_buf),
-                                       .width = 60};
+                                       .buffer_size = sizeof(s_fps_buf)};
   sk_settings_entry_add_editbox(entry, .title = "Refresh FPS",
                                 .sub = "Widget refresh rate; restarts widgets.",
                                 .fields = &fps_field, .field_count = 1,
@@ -530,8 +529,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField font_field = {.name = "font_size",
                                         .label = "Size:",
                                         .buffer = s_font_buf,
-                                        .buffer_size = sizeof(s_font_buf),
-                                        .width = 60};
+                                        .buffer_size = sizeof(s_font_buf)};
   sk_settings_entry_add_editbox(entry, .title = "Font Size",
                                 .sub = "Font size used by widget text.",
                                 .fields = &font_field, .field_count = 1,
@@ -540,8 +538,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField net_field = {.name = "net_ms",
                                        .label = "ms:",
                                        .buffer = s_net_buf,
-                                       .buffer_size = sizeof(s_net_buf),
-                                       .width = 70};
+                                       .buffer_size = sizeof(s_net_buf)};
   sk_settings_entry_add_editbox(entry, .title = "Network Sample Interval",
                                 .sub = "How often network usage is sampled.",
                                 .fields = &net_field, .field_count = 1,

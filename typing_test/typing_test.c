@@ -1474,8 +1474,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField field = {.name = "word_count",
                                    .label = "Words:",
                                    .buffer = s_word_count_buf,
-                                   .buffer_size = sizeof(s_word_count_buf),
-                                   .width = 70};
+                                   .buffer_size = sizeof(s_word_count_buf)};
   sk_settings_entry_add_editbox(entry, .title = "Words Per Test",
                                 .sub = "Number of words in each test.",
                                 .fields = &field, .field_count = 1,

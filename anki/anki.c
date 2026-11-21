@@ -583,8 +583,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField deck_field = {.name = "deck",
                                         .label = "Deck:",
                                         .buffer = s_deck,
-                                        .buffer_size = sizeof(s_deck),
-                                        .width = 180};
+                                        .buffer_size = sizeof(s_deck)};
   sk_settings_entry_add_editbox(entry, .title = "Deck Name",
                                 .sub = "Anki deck to read due cards from.",
                                 .fields = &deck_field, .field_count = 1,
@@ -593,8 +592,7 @@ SKALD_FEATURE_INIT {
   SkSettingsEditboxField interval_field = {.name = "interval",
                                            .label = "Seconds:",
                                            .buffer = s_interval,
-                                           .buffer_size = sizeof(s_interval),
-                                           .width = 70};
+                                           .buffer_size = sizeof(s_interval)};
   sk_settings_entry_add_editbox(entry, .title = "Auto-Show Interval",
                                 .sub = "Seconds between automatic card prompts.",
                                 .fields = &interval_field, .field_count = 1,

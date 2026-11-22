@@ -17,6 +17,10 @@ static SkThread thread = NULL;
 
 #define MACRO_OVERLAY_NAME "macro_overlay"
 
+#define MACRO_INFINITE_PLAYBACK_KEY "macro.infinite_playback"
+#define MACRO_REMOVE_DEAD_TIME_KEY "macro.remove_dead_time"
+#define MACRO_CURRENT_KEY "macro.current_macro"
+
 #define EVT_KEY 1
 #define EVT_MOUSE 2
 #define EVT_MOVE 3
@@ -237,7 +241,7 @@ static void *playback_loop(void *arg) {
       double target_ms = (double)(m->t_us - t0) / 1000.0;
       double cur_ms = sk_end_timer(start);
       double wait_ms = target_ms - cur_ms;
-      if (sk_config_get_setting_bool("Macro.Remove Dead Time") &&
+      if (sk_config_get_setting_bool(MACRO_REMOVE_DEAD_TIME_KEY) &&
           wait_ms > DEAD_TIME_LIMIT)
         wait_ms = 0.0;
       if (wait_ms > 0.0)
@@ -263,7 +267,7 @@ static void *playback_loop(void *arg) {
       }
     }
     release_everything();
-    if (playing && sk_config_get_setting_bool("Macro.Infinite Playback"))
+    if (playing && sk_config_get_setting_bool(MACRO_INFINITE_PLAYBACK_KEY))
       continue;
     break;
   }
@@ -468,11 +472,11 @@ static void macro_toggle_setting(const char *key) {
 }
 
 static void infinite_playback_toggle(void) {
-  macro_toggle_setting("Macro.Infinite Playback");
+  macro_toggle_setting(MACRO_INFINITE_PLAYBACK_KEY);
 }
 
 static void remove_dead_time_toggle(void) {
-  macro_toggle_setting("Macro.Remove Dead Time");
+  macro_toggle_setting(MACRO_REMOVE_DEAD_TIME_KEY);
 }
 
 static void record_toggle(void) {
@@ -503,8 +507,12 @@ static void macro_select_current(const char *option, int index) {
 
 SKALD_FEATURE_INIT {
   init_macros();
-  sk_register_hotkey(.hotkey = "Ctrl+Alt+R", .cb = record_toggle);
-  sk_register_hotkey(.hotkey = "Ctrl+Alt+P", .cb = PlayMacro);
+  sk_register_config_hotkey(.name = "Record Macro", .key = "macro.record",
+                            .default_hotkey = "Ctrl+Alt+R",
+                            .cb = record_toggle);
+  sk_register_config_hotkey(.name = "Play Macro", .key = "macro.play",
+                            .default_hotkey = "Ctrl+Alt+P", .cb = PlayMacro);
+
   sk_add_to_cc(.display_name = "Save Macro", .on_action = SaveMacro,
                .type = "Macro", .icon = "/save.png");
   sk_add_to_cc(.display_name = "Load Macro", .on_action = LoadMacro,
@@ -520,15 +528,16 @@ SKALD_FEATURE_INIT {
       sk_add_settings_entry(.name = "Macro", .icon = "/save.png",
                             .desc = "Configure Macro Settings");
 
-  sk_settings_entry_add_checkbox(macro, .title = "Infinite Playback",
+  sk_settings_entry_add_checkbox(macro, .key = MACRO_INFINITE_PLAYBACK_KEY,
+                                 .title = "Infinite Playback",
                                  .sub = "Toggle infinite playback");
 
   sk_settings_entry_add_checkbox(
-      macro, .title = "Remove Dead Time",
-     .sub = "Toggle removal of dead time (more than 250ms by default)");
+      macro, .key = MACRO_REMOVE_DEAD_TIME_KEY, .title = "Remove Dead Time",
+      .sub = "Toggle removal of dead time (more than 250ms by default)");
 
   sk_settings_entry_add_dropdown(
-      macro, .title = "Current Macro In Use",
+      macro, .key = MACRO_CURRENT_KEY, .title = "Current Macro In Use",
       .sub = "The current macro that the playback will use",
       .refresh_options = macro_refresh_options,
       .on_select = macro_select_current);

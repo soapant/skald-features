@@ -459,7 +459,6 @@ static void pk_sort_select(const char *option, int index) {
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Alt+U", .cb = trigger_process_killer);
   sk_add_feature(.display_name = "Process Killer",
                  .on_action = trigger_process_killer, .icon = "/skull.png");
 

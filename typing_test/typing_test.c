@@ -1450,7 +1450,6 @@ SKALD_FEATURE_INIT {
   typing_test_word_count = typing_test_config_word_count();
 
   text = typing_test_get_random_text(typing_test_word_count);
-  sk_register_hotkey(.hotkey = "Alt+B", .cb = trigger_typing_test);
   sk_add_feature(.display_name = "Typing Test",
                  .on_action = trigger_typing_test, .icon = "/keyboard.png");
 

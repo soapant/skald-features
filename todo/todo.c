@@ -359,8 +359,6 @@ static void trigger_todo(void) {
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Alt+T", .cb = trigger_todo);
-
   sk_add_feature(.display_name = "Todo", .on_action = trigger_todo,
                  .icon = "/list-check.png");
 }

@@ -1,553 +1,1076 @@
 #include "core/skapi.h"
 #include "sqlite3.h"
+#include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <time.h>
 
-typedef enum { CARD_TYPE_BASIC, CARD_TYPE_CLOZE, CARD_TYPE_UNKNOWN } CardType;
+#define ANKI_TEXT_CAP 8192
+#define ANKI_DECK_NAME 256
+#define ANKI_LEARN_STEP_1 60
+#define ANKI_LEARN_STEP_2 600
+#define ANKI_START_FACTOR 2500
+#define ANKI_MIN_FACTOR 1300
+#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f)
+
 typedef struct {
-  char *front;
-  char *back;
-} BasicCard;
-typedef struct {
-  char *text;
-} ClozeCard;
-typedef struct {
-  CardType type;
   long long id;
-  long long due;
-  int queue;
-  long long due_ts;
-  union {
-    BasicCard basic;
-    ClozeCard cloze;
-  } data;
-} TYPE_NAME;
+  char name[ANKI_DECK_NAME];
+  int due;
+} AnkiDeck;
+
 typedef struct {
-  TYPE_NAME *items;
-  size_t count;
-  size_t capacity;
-} CardList;
+  long long id;
+  long long due_ts;
+  long long ivl;
+  long long factor;
+  int queue;
+  int reps;
+  int lapses;
+  int odid;
+  int cloze;
+  char *flds;
+} AnkiCard;
 
-typedef enum {
-  ANKI_STATE_IDLE = 0,
-  ANKI_STATE_QUESTION,
-  ANKI_STATE_ANSWER
-} AnkiState;
+typedef enum { ANKI_VIEW_DECKS, ANKI_VIEW_CARD } AnkiView;
+typedef enum { ANKI_SIDE_QUESTION, ANKI_SIDE_ANSWER } AnkiSide;
 
-static TYPE_NAME current_card = {0};
-static AnkiState anki_state = ANKI_STATE_IDLE;
-static SkTimer q_timer = {0};
+static AnkiView g_view = ANKI_VIEW_DECKS;
+static AnkiSide g_side = ANKI_SIDE_QUESTION;
+static long long g_crt = 0;
+
+static AnkiDeck *g_decks;
+static const char **g_deck_items;
+static int g_deck_count;
+static int g_deck_cap;
+
+static AnkiCard *g_cards;
+static int g_card_count;
+static int g_card_cap;
+static int g_card_pos;
+static char g_deck_name[ANKI_DECK_NAME];
+
+static SkTimer g_answer_timer;
+static char g_qtext[ANKI_TEXT_CAP];
+static char g_atext[ANKI_TEXT_CAP];
+static long long g_last_revlog_ms;
+static bool g_revlog_init;
 
 static SkLibrary g_sqlite_lib = NULL;
-static int (*p_sqlite3_open_v2)(const char *, sqlite3 **, int,
-                                const char *) = NULL;
-static const char *(*p_sqlite3_errmsg)(sqlite3 *) = NULL;
-static int (*p_sqlite3_prepare_v2)(sqlite3 *, const char *, int,
-                                   sqlite3_stmt **, const char **) = NULL;
-static int (*p_sqlite3_step)(sqlite3_stmt *) = NULL;
-static const unsigned char *(*p_sqlite3_column_text)(sqlite3_stmt *,
-                                                     int) = NULL;
-static long long (*p_sqlite3_column_int64)(sqlite3_stmt *, int) = NULL;
-static int (*p_sqlite3_finalize)(sqlite3_stmt *) = NULL;
-static int (*p_sqlite3_bind_text)(sqlite3_stmt *, int, const char *, int,
-                                  void (*)(void *)) = NULL;
-static int (*p_sqlite3_close)(sqlite3 *) = NULL;
-static int (*p_sqlite3_bind_int64)(sqlite3_stmt *, int, sqlite3_int64) = NULL;
+static int (*q_open)(const char *, sqlite3 **, int, const char *);
+static int (*q_close)(sqlite3 *);
+static int (*q_exec)(sqlite3 *, const char *,
+                     int (*)(void *, int, char **, char **), void *, char **);
+static int (*q_prepare)(sqlite3 *, const char *, int, sqlite3_stmt **,
+                        const char **);
+static int (*q_step)(sqlite3_stmt *);
+static int (*q_finalize)(sqlite3_stmt *);
+static int (*q_bind_i64)(sqlite3_stmt *, int, sqlite3_int64);
+static const unsigned char *(*q_col_text)(sqlite3_stmt *, int);
+static sqlite3_int64 (*q_col_i64)(sqlite3_stmt *, int);
+static const char *(*q_errmsg)(sqlite3 *);
 
-static char *safe_strdup(const char *s) {
-  if (!s)
-    return NULL;
-  size_t len = strlen(s) + 1;
-  char *new_s = malloc(len);
-  if (new_s)
-    memcpy(new_s, s, len);
-  return new_s;
-}
-
-static TYPE_NAME card_clone(TYPE_NAME card) {
-  TYPE_NAME clone = card;
-  if (card.type == CARD_TYPE_BASIC) {
-    clone.data.basic.front = safe_strdup(card.data.basic.front);
-    clone.data.basic.back = safe_strdup(card.data.basic.back);
-  } else if (card.type == CARD_TYPE_CLOZE) {
-    clone.data.cloze.text = safe_strdup(card.data.cloze.text);
-  }
-  return clone;
-}
-
-static void free_card_contents(TYPE_NAME *card) {
-  if (card->type == CARD_TYPE_BASIC) {
-    free(card->data.basic.front);
-    free(card->data.basic.back);
-    card->data.basic.front = NULL;
-    card->data.basic.back = NULL;
-  } else if (card->type == CARD_TYPE_CLOZE) {
-    free(card->data.cloze.text);
-    card->data.cloze.text = NULL;
-  }
-  card->type = CARD_TYPE_UNKNOWN;
-}
-
-static int sqlite_init(void) {
+static bool sqlite_init(void) {
   if (g_sqlite_lib)
-    return 1;
+    return q_open && q_prepare && q_step && q_finalize && q_exec;
   char buf[1024] = {0};
   char *dir = sk_resolve_feature_path("anki");
+  if (!dir)
+    return false;
 #if defined(_WIN32)
   snprintf(buf, sizeof(buf), "%s/sqlite3.dll", dir);
-#elif defined(__linux__)
+#elif defined(__APPLE__)
+  snprintf(buf, sizeof(buf), "%s/libsqlite3.dylib", dir);
+#else
   snprintf(buf, sizeof(buf), "%s/libsqlite3.so", dir);
 #endif
+  free(dir);
   g_sqlite_lib = sk_library_open(buf);
-  if (g_sqlite_lib)
-    sk_library_register("sqlite", g_sqlite_lib);
   if (!g_sqlite_lib)
-    return 0;
-  p_sqlite3_open_v2 =
-      (int (*)(const char *, sqlite3 **, int, const char *))sk_library_symbol(
-          g_sqlite_lib, "sqlite3_open_v2");
-  p_sqlite3_errmsg = (const char *(*)(sqlite3 *))sk_library_symbol(
-      g_sqlite_lib, "sqlite3_errmsg");
-  p_sqlite3_prepare_v2 =
-      (int (*)(sqlite3 *, const char *, int, sqlite3_stmt **, const char **))
-          sk_library_symbol(g_sqlite_lib, "sqlite3_prepare_v2");
-  p_sqlite3_step =
-      (int (*)(sqlite3_stmt *))sk_library_symbol(g_sqlite_lib, "sqlite3_step");
-  p_sqlite3_column_text =
+    return false;
+  sk_library_register("sqlite", g_sqlite_lib);
+  q_open = (int (*)(const char *, sqlite3 **, int,
+                    const char *))sk_library_symbol(g_sqlite_lib,
+                                                    "sqlite3_open_v2");
+  q_close =
+      (int (*)(sqlite3 *))sk_library_symbol(g_sqlite_lib, "sqlite3_close");
+  q_exec = (int (*)(sqlite3 *, const char *,
+                    int (*)(void *, int, char **, char **), void *,
+                    char **))sk_library_symbol(g_sqlite_lib, "sqlite3_exec");
+  q_prepare = (int (*)(sqlite3 *, const char *, int, sqlite3_stmt **,
+                       const char **))sk_library_symbol(g_sqlite_lib,
+                                                        "sqlite3_prepare_v2");
+  q_step = (int (*)(sqlite3_stmt *))sk_library_symbol(g_sqlite_lib,
+                                                      "sqlite3_step");
+  q_finalize = (int (*)(sqlite3_stmt *))sk_library_symbol(g_sqlite_lib,
+                                                          "sqlite3_finalize");
+  q_bind_i64 =
+      (int (*)(sqlite3_stmt *, int, sqlite3_int64))sk_library_symbol(
+          g_sqlite_lib, "sqlite3_bind_int64");
+  q_col_text =
       (const unsigned char *(*)(sqlite3_stmt *, int))sk_library_symbol(
           g_sqlite_lib, "sqlite3_column_text");
-  p_sqlite3_column_int64 =
-      (long long (*)(sqlite3_stmt *, int))sk_library_symbol(
-          g_sqlite_lib, "sqlite3_column_int64");
-  p_sqlite3_finalize = (int (*)(sqlite3_stmt *))sk_library_symbol(
-      g_sqlite_lib, "sqlite3_finalize");
-  p_sqlite3_bind_text =
-      (int (*)(sqlite3_stmt *, int, const char *, int, void (*)(void *)))
-          sk_library_symbol(g_sqlite_lib, "sqlite3_bind_text");
-  p_sqlite3_close =
-      (int (*)(sqlite3 *))sk_library_symbol(g_sqlite_lib, "sqlite3_close");
-  p_sqlite3_bind_int64 =
-      (int (*)(sqlite3_stmt *, int, long long))sk_library_symbol(
-          g_sqlite_lib, "sqlite3_bind_int64");
-  return p_sqlite3_open_v2 && p_sqlite3_errmsg && p_sqlite3_prepare_v2 &&
-         p_sqlite3_step;
+  q_col_i64 =
+      (sqlite3_int64(*)(sqlite3_stmt *, int))sk_library_symbol(g_sqlite_lib,
+                                                               "sqlite3_column_int64");
+  q_errmsg = (const char *(*)(sqlite3 *))sk_library_symbol(g_sqlite_lib,
+                                                           "sqlite3_errmsg");
+  return q_open && q_close && q_exec && q_prepare && q_step && q_finalize &&
+         q_bind_i64 && q_col_text && q_col_i64 && q_errmsg;
 }
 
-static long long anki_crt = 0;
+static bool anki_db_path(char *out, size_t n) {
+  const char *home = sk_resolve_user_path();
+  if (!home || !home[0])
+    return false;
+#if defined(_WIN32)
+  snprintf(out, n, "%s/AppData/Roaming/Anki2/User 1/collection.anki2", home);
+#elif defined(__APPLE__)
+  snprintf(out, n,
+           "%s/Library/Application Support/Anki2/User 1/collection.anki2",
+           home);
+#else
+  snprintf(out, n, "%s/.local/share/Anki2/User 1/collection.anki2", home);
+#endif
+  return true;
+}
 
-static long long anki_due_ts(long long now, int queue, long long due) {
-  if (queue == 1 || queue == 3) {
+static bool db_open(const char *path, int flags, sqlite3 **out) {
+  *out = NULL;
+  if (q_open(path, out, flags, NULL) != SQLITE_OK) {
+    if (*out)
+      q_close(*out);
+    *out = NULL;
+    return false;
+  }
+  return true;
+}
+
+static void load_crt(sqlite3 *db) {
+  sqlite3_stmt *st = NULL;
+  if (q_prepare(db, "SELECT crt FROM col;", -1, &st, NULL) != SQLITE_OK)
+    return;
+  if (q_step(st) == SQLITE_ROW)
+    g_crt = (long long)q_col_i64(st, 0);
+  q_finalize(st);
+}
+
+static long long due_to_ts(long long now, int queue, long long due) {
+  if (queue == 1 || queue == 3)
     return due;
-  }
-  if (queue == 2) {
-    long long days_elapsed = (now - anki_crt) / 86400;
-    long long next_day_at = anki_crt + (days_elapsed + 1) * 86400;
-    return next_day_at + (due - days_elapsed) * 86400;
-  }
-  return 0;
+  if (queue == 2)
+    return g_crt > 0 ? g_crt + due * 86400 : now;
+  return now;
 }
 
-static int card_due_cmp(const void *a, const void *b) {
-  const TYPE_NAME *ca = (const TYPE_NAME *)a;
-  const TYPE_NAME *cb = (const TYPE_NAME *)b;
+static void free_decks(void) {
+  free(g_decks);
+  free(g_deck_items);
+  g_decks = NULL;
+  g_deck_items = NULL;
+  g_deck_count = 0;
+  g_deck_cap = 0;
+}
+
+static void free_cards(void) {
+  for (int i = 0; i < g_card_count; i++)
+    free(g_cards[i].flds);
+  free(g_cards);
+  g_cards = NULL;
+  g_card_count = 0;
+  g_card_cap = 0;
+  g_card_pos = 0;
+}
+
+static bool decks_reserve(int needed) {
+  if (needed <= g_deck_cap)
+    return true;
+  int cap = g_deck_cap ? g_deck_cap * 2 : 32;
+  while (cap < needed)
+    cap *= 2;
+  AnkiDeck *d = realloc(g_decks, (size_t)cap * sizeof(*d));
+  if (!d)
+    return false;
+  g_decks = d;
+  const char **it = realloc(g_deck_items, (size_t)cap * sizeof(*it));
+  if (!it)
+    return false;
+  g_deck_items = it;
+  g_deck_cap = cap;
+  return true;
+}
+
+static bool cards_reserve(int needed) {
+  if (needed <= g_card_cap)
+    return true;
+  int cap = g_card_cap ? g_card_cap * 2 : 64;
+  while (cap < needed)
+    cap *= 2;
+  AnkiCard *c = realloc(g_cards, (size_t)cap * sizeof(*c));
+  if (!c)
+    return false;
+  g_cards = c;
+  g_card_cap = cap;
+  return true;
+}
+
+static int deck_cmp(const void *a, const void *b) {
+  const AnkiDeck *da = (const AnkiDeck *)a;
+  const AnkiDeck *db = (const AnkiDeck *)b;
+  return strcmp(da->name, db->name);
+}
+
+static void load_decks(void) {
+  free_decks();
+  if (!sqlite_init()) {
+    fprintf(stderr, "anki: could not load bundled SQLite library\n");
+    return;
+  }
+  char path[1024];
+  if (!anki_db_path(path, sizeof(path))) {
+    fprintf(stderr, "anki: could not resolve the home directory\n");
+    return;
+  }
+  sqlite3 *db = NULL;
+  if (!db_open(path, SQLITE_OPEN_READONLY, &db)) {
+    fprintf(stderr, "anki: could not open collection '%s'\n", path);
+    return;
+  }
+  load_crt(db);
+  long long now = (long long)time(NULL);
+
+  sqlite3_stmt *st = NULL;
+  if (q_prepare(db, "SELECT id, name FROM decks;", -1, &st, NULL) ==
+      SQLITE_OK) {
+    while (q_step(st) == SQLITE_ROW) {
+      const unsigned char *raw = q_col_text(st, 1);
+      if (!raw)
+        continue;
+      const char *name = (const char *)raw;
+      if (strchr(name, '\x1f') || strstr(name, "::"))
+        continue;
+      if (!decks_reserve(g_deck_count + 1))
+        break;
+      AnkiDeck *d = &g_decks[g_deck_count++];
+      memset(d, 0, sizeof(*d));
+      d->id = (long long)q_col_i64(st, 0);
+      snprintf(d->name, sizeof(d->name), "%s", name);
+    }
+    q_finalize(st);
+  } else {
+    fprintf(stderr, "anki: deck query failed: %s\n", q_errmsg(db));
+  }
+
+  st = NULL;
+  if (q_prepare(db, "SELECT did, due, queue, odid, odue FROM cards "
+                    "WHERE queue >= 0;",
+                -1, &st, NULL) == SQLITE_OK) {
+    while (q_step(st) == SQLITE_ROW) {
+      long long did = (long long)q_col_i64(st, 0);
+      long long due = (long long)q_col_i64(st, 1);
+      int queue = (int)q_col_i64(st, 2);
+      long long odid = (long long)q_col_i64(st, 3);
+      long long odue = (long long)q_col_i64(st, 4);
+      for (int i = 0; i < g_deck_count; i++) {
+        if (g_decks[i].id == did) {
+          if (due_to_ts(now, queue, odid != 0 ? odue : due) <= now)
+            g_decks[i].due++;
+          break;
+        }
+      }
+    }
+    q_finalize(st);
+  } else {
+    fprintf(stderr, "anki: due-count query failed: %s\n", q_errmsg(db));
+  }
+  if (g_deck_count > 1)
+    qsort(g_decks, (size_t)g_deck_count, sizeof(*g_decks), deck_cmp);
+  for (int i = 0; i < g_deck_count; i++)
+    g_deck_items[i] = g_decks[i].name;
+  q_close(db);
+}
+
+static int card_cmp(const void *a, const void *b) {
+  const AnkiCard *ca = (const AnkiCard *)a;
+  const AnkiCard *cb = (const AnkiCard *)b;
   if (ca->due_ts < cb->due_ts)
     return -1;
   if (ca->due_ts > cb->due_ts)
     return 1;
+  if (ca->id < cb->id)
+    return -1;
+  if (ca->id > cb->id)
+    return 1;
   return 0;
 }
 
-static void card_list_push(CardList *list, TYPE_NAME card) {
-  if (list->count == list->capacity) {
-    list->capacity = list->capacity == 0 ? 16 : list->capacity * 2;
-    list->items = realloc(list->items, list->capacity * sizeof(TYPE_NAME));
-  }
-  list->items[list->count++] = card;
-}
-
-static void free_card_list(CardList *list) {
-  for (size_t i = 0; i < list->count; i++) {
-    if (list->items[i].type == CARD_TYPE_BASIC) {
-      free(list->items[i].data.basic.front);
-      free(list->items[i].data.basic.back);
-    } else if (list->items[i].type == CARD_TYPE_CLOZE) {
-      free(list->items[i].data.cloze.text);
-    }
-  }
-  free(list->items);
-  list->items = NULL;
-  list->count = 0;
-  list->capacity = 0;
-}
-
-static CardList get_cards_in_deck(const char *db_path,
-                                  const char *target_deck_name) {
-  CardList list = {0};
+static void load_cards(const char *deck_name) {
+  free_cards();
+  g_deck_name[0] = '\0';
+  snprintf(g_deck_name, sizeof(g_deck_name), "%s", deck_name ? deck_name : "");
   if (!sqlite_init()) {
-    fprintf(stderr, "sqlite lib not found\n");
-    return list;
+    fprintf(stderr, "anki: could not load bundled SQLite library\n");
+    return;
+  }
+  char path[1024];
+  if (!anki_db_path(path, sizeof(path))) {
+    fprintf(stderr, "anki: could not resolve the home directory\n");
+    return;
   }
   sqlite3 *db = NULL;
-  sqlite3_stmt *stmt = NULL;
-  if (p_sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) !=
+  if (!db_open(path, SQLITE_OPEN_READONLY, &db)) {
+    fprintf(stderr, "anki: could not open collection '%s'\n", path);
+    return;
+  }
+  load_crt(db);
+
+  long long deck_id = 0;
+  bool found = false;
+  sqlite3_stmt *st = NULL;
+  if (q_prepare(db, "SELECT id, name FROM decks;", -1, &st, NULL) ==
       SQLITE_OK) {
-    fprintf(stderr, "Failed to open DB: %s\n", p_sqlite3_errmsg(db));
-    return list;
-  }
-  {
-    sqlite3_stmt *cs = NULL;
-    if (p_sqlite3_prepare_v2(db, "SELECT crt FROM col;", -1, &cs, NULL) ==
-        SQLITE_OK) {
-      if (p_sqlite3_step(cs) == SQLITE_ROW)
-        anki_crt = p_sqlite3_column_int64(cs, 0);
-      p_sqlite3_finalize(cs);
-    }
-  }
-  char *deck_id = NULL;
-  if (p_sqlite3_prepare_v2(db, "SELECT id, name FROM decks;", -1, &stmt,
-                           NULL) == SQLITE_OK) {
-    while (p_sqlite3_step(stmt) == SQLITE_ROW) {
-      long long id = p_sqlite3_column_int64(stmt, 0);
-      const char *name = (const char *)p_sqlite3_column_text(stmt, 1);
-      if (name && strcmp(name, target_deck_name) == 0) {
-        char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%lld", id);
-        deck_id = safe_strdup(tmp);
+    while (q_step(st) == SQLITE_ROW) {
+      const unsigned char *name = q_col_text(st, 1);
+      if (name && strcmp((const char *)name, g_deck_name) == 0) {
+        deck_id = (long long)q_col_i64(st, 0);
+        found = true;
         break;
       }
     }
-    p_sqlite3_finalize(stmt);
-    stmt = NULL;
+    q_finalize(st);
+  } else {
+    fprintf(stderr, "anki: deck lookup failed: %s\n", q_errmsg(db));
   }
-  if (!deck_id) {
-    fprintf(stderr, "Deck '%s' not found in collection.\n", target_deck_name);
-    p_sqlite3_close(db);
-    return list;
+  if (!found) {
+    q_close(db);
+    return;
   }
-  const char *query = "SELECT c.id, n.flds, n.mid, c.due, c.queue FROM notes n "
-                      "JOIN cards c ON n.id = c.nid WHERE c.did = ?;";
-  if (p_sqlite3_prepare_v2(db, query, -1, &stmt, NULL) == SQLITE_OK) {
-    p_sqlite3_bind_text(stmt, 1, deck_id, -1, SQLITE_TRANSIENT);
-    while (p_sqlite3_step(stmt) == SQLITE_ROW) {
-      const char *flds = (const char *)p_sqlite3_column_text(stmt, 1);
+
+  long long now = (long long)time(NULL);
+  st = NULL;
+  if (q_prepare(db, "SELECT c.id, n.flds, c.due, c.queue, c.ivl, c.factor, "
+                    "c.reps, c.lapses, c.odid, c.odue FROM notes n JOIN "
+                    "cards c ON n.id = c.nid WHERE c.did = ? AND "
+                    "c.queue >= 0;",
+                -1, &st, NULL) == SQLITE_OK) {
+    q_bind_i64(st, 1, deck_id);
+    while (q_step(st) == SQLITE_ROW) {
+      int queue = (int)q_col_i64(st, 3);
+      long long odid = (long long)q_col_i64(st, 8);
+      long long odue = (long long)q_col_i64(st, 9);
+      long long due = odid != 0 ? odue : (long long)q_col_i64(st, 2);
+      long long ts = due_to_ts(now, queue, due);
+      if (ts > now)
+        continue;
+      const unsigned char *flds = q_col_text(st, 1);
       if (!flds)
         continue;
-      TYPE_NAME card = {0};
-      card.id = p_sqlite3_column_int64(stmt, 0);
-      card.due = p_sqlite3_column_int64(stmt, 3);
-      card.queue = (int)p_sqlite3_column_int64(stmt, 4);
-      card.due_ts = anki_due_ts((long long)time(NULL), card.queue, card.due);
-      if (strstr(flds, "{{c") != NULL) {
-        card.type = CARD_TYPE_CLOZE;
-        char *csep = strchr(flds, '\x1f');
-        size_t clen = csep ? (size_t)(csep - flds) : strlen(flds);
-        card.data.cloze.text = malloc(clen + 1);
-        strncpy(card.data.cloze.text, flds, clen);
-        card.data.cloze.text[clen] = '\0';
-      } else {
-        card.type = CARD_TYPE_BASIC;
-        char *sep = strchr(flds, '\x1f');
-        if (sep) {
-          size_t front_len = sep - flds;
-          char *front = malloc(front_len + 1);
-          strncpy(front, flds, front_len);
-          front[front_len] = '\0';
-          card.data.basic.front = front;
-          card.data.basic.back = safe_strdup(sep + 1);
-        } else {
-          card.data.basic.front = safe_strdup(flds);
-          card.data.basic.back = safe_strdup("");
-        }
+      if (!cards_reserve(g_card_count + 1))
+        break;
+      AnkiCard *c = &g_cards[g_card_count++];
+      memset(c, 0, sizeof(*c));
+      c->id = (long long)q_col_i64(st, 0);
+      c->due_ts = ts;
+      c->ivl = (long long)q_col_i64(st, 4);
+      c->factor = (long long)q_col_i64(st, 5);
+      c->queue = queue;
+      c->reps = (int)q_col_i64(st, 6);
+      c->lapses = (int)q_col_i64(st, 7);
+      c->odid = (int)odid;
+      c->cloze = strstr((const char *)flds, "{{c") != NULL;
+      size_t flen = strlen((const char *)flds) + 1;
+      c->flds = malloc(flen);
+      if (!c->flds) {
+        g_card_count--;
+        continue;
       }
-      card_list_push(&list, card);
+      memcpy(c->flds, flds, flen);
     }
-    p_sqlite3_finalize(stmt);
-    stmt = NULL;
+    q_finalize(st);
   } else {
-    fprintf(stderr, "Failed to prepare query: %s\n", p_sqlite3_errmsg(db));
+    fprintf(stderr, "anki: card query failed: %s\n", q_errmsg(db));
   }
-  qsort(list.items, list.count, sizeof(TYPE_NAME), card_due_cmp);
-  free(deck_id);
-  p_sqlite3_close(db);
-  return list;
+  q_close(db);
+  if (g_card_count > 1)
+    qsort(g_cards, (size_t)g_card_count, sizeof(*g_cards), card_cmp);
 }
 
-static void display_card_question(TYPE_NAME card) {
-  char question[1024];
-  question[0] = '\0';
-  if (card.type == CARD_TYPE_BASIC) {
-    snprintf(question, sizeof(question), "%s", card.data.basic.front);
-  } else if (card.type == CARD_TYPE_CLOZE) {
-    const char *src = card.data.cloze.text;
-    size_t src_len = strlen(src);
-    size_t o = 0;
+static void append_n(const char *s, size_t n, char *out, size_t cap,
+                     size_t *o) {
+  for (size_t i = 0; i < n && *o + 1 < cap; i++)
+    out[(*o)++] = s[i];
+}
 
-    size_t i = 0;
-    while (i < src_len && o + 1 < sizeof(question)) {
-      if (src[i] == '{') {
-        size_t j = i + 1;
-        while (j < src_len && src[j] != '}')
-          j++;
+static bool ci_starts(const char *s, size_t n, const char *prefix) {
+  size_t len = strlen(prefix);
+  if (n < len)
+    return false;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char a = (unsigned char)s[i];
+    unsigned char b = (unsigned char)prefix[i];
+    if (tolower(a) != tolower(b))
+      return false;
+  }
+  return true;
+}
 
-        if (j < src_len) {
-          const char *replacement = "[...]";
-          for (size_t k = 0; replacement[k] && o + 1 < sizeof(question); k++) {
-            question[o++] = replacement[k];
-          }
-          i = j + 2;
-          continue;
+static bool tag_is_break(const char *t, size_t n) {
+  size_t k = 0;
+  while (k < n && (t[k] == '/' || isspace((unsigned char)t[k])))
+    k++;
+  if (k >= n)
+    return false;
+  static const char *const breaks[] = {"br", "p",  "div", "li", "tr", "ul",
+                                       "ol", "h1", "h2",  "h3", "h4", "h5",
+                                       "h6"};
+  for (size_t i = 0; i < sizeof(breaks) / sizeof(breaks[0]); i++) {
+    size_t len = strlen(breaks[i]);
+    if (ci_starts(t + k, n - k, breaks[i]) &&
+        (k + len >= n || !isalnum((unsigned char)t[k + len])))
+      return true;
+  }
+  return false;
+}
+
+static void cloze_append(const char *inner, size_t n, bool answer, char *out,
+                         size_t cap, size_t *o) {
+  size_t p = 0;
+  while (p < n && (inner[p] == 'c' || inner[p] == 'C'))
+    p++;
+  while (p < n && isdigit((unsigned char)inner[p]))
+    p++;
+  size_t sep1 = SIZE_MAX;
+  for (size_t i = p; i + 1 < n; i++) {
+    if (inner[i] == ':' && inner[i + 1] == ':') {
+      sep1 = i + 2;
+      break;
+    }
+  }
+  size_t sep2 = SIZE_MAX;
+  if (sep1 != SIZE_MAX) {
+    for (size_t i = sep1; i + 1 < n; i++) {
+      if (inner[i] == ':' && inner[i + 1] == ':') {
+        sep2 = i;
+        break;
+      }
+    }
+  }
+  if (answer) {
+    size_t start = sep1 != SIZE_MAX ? sep1 : p;
+    size_t end = sep2 != SIZE_MAX ? sep2 : n;
+    append_n(inner + start, end - start, out, cap, o);
+  } else if (sep2 != SIZE_MAX && sep2 + 2 < n) {
+    append_n(inner + sep2 + 2, n - sep2 - 2, out, cap, o);
+  } else {
+    append_n("...", 3, out, cap, o);
+  }
+}
+
+static void clean_copy(const char *src, char *out, size_t cap, size_t *o,
+                       int cloze_mode) {
+  size_t len = strlen(src);
+  for (size_t i = 0; i < len && *o + 1 < cap;) {
+    if (cloze_mode && i + 1 < len && src[i] == '{' && src[i + 1] == '{') {
+      size_t j = i + 2;
+      while (j + 1 < len && !(src[j] == '}' && src[j + 1] == '}'))
+        j++;
+      if (j + 1 < len) {
+        cloze_append(src + i + 2, j - i - 2, cloze_mode == 2, out, cap, o);
+        i = j + 2;
+        continue;
+      }
+    }
+    if (src[i] == '[' && i + 7 <= len &&
+        strncmp(src + i, "[sound:", 7) == 0) {
+      const char *end = strchr(src + i, ']');
+      i = end ? (size_t)(end - src) + 1 : len;
+      continue;
+    }
+    if (src[i] == '<') {
+      size_t j = i + 1;
+      while (j < len && src[j] != '>')
+        j++;
+      if (j < len) {
+        if (tag_is_break(src + i + 1, j - i - 1) && *o + 1 < cap)
+          out[(*o)++] = '\n';
+        i = j + 1;
+        continue;
+      }
+    }
+    if (src[i] == '&') {
+      static const char *const names[] = {"nbsp;", "amp;",  "lt;",
+                                          "gt;",   "quot;", "amp;"};
+      static const char vals[] = {' ', '&', '<', '>', '"', '&'};
+      bool matched = false;
+      for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); k++) {
+        size_t nl = strlen(names[k]);
+        if (i + 1 + nl <= len && strncmp(src + i + 1, names[k], nl) == 0) {
+          out[(*o)++] = vals[k];
+          i += 1 + nl;
+          matched = true;
+          break;
         }
       }
-      question[o++] = src[i++];
+      if (matched)
+        continue;
     }
-    question[o] = '\0';
+    out[(*o)++] = src[i++];
   }
-  q_timer = sk_start_timer();
-  sk_message(.name = "question", .message = question, .slot = TOP_CENTER,
-             .timeout = 10000.0);
+  out[*o] = '\0';
 }
 
-static void anki_apply_elapsed(double elapsed_ms) {
-  double elapsed_s = elapsed_ms / 1000.0;
-
-  if (elapsed_s > 20)
+static void build_text(const AnkiCard *card, bool answer, char *out,
+                       size_t cap) {
+  out[0] = '\0';
+  if (!card || !card->flds)
     return;
+  char f0[ANKI_TEXT_CAP];
+  char f1[ANKI_TEXT_CAP];
+  const char *sep = strchr(card->flds, '\x1f');
+  size_t n0 = sep ? (size_t)(sep - card->flds) : strlen(card->flds);
+  if (n0 >= sizeof(f0))
+    n0 = sizeof(f0) - 1;
+  memcpy(f0, card->flds, n0);
+  f0[n0] = '\0';
+  f1[0] = '\0';
+  if (sep) {
+    size_t n1 = strlen(sep + 1);
+    if (n1 >= sizeof(f1))
+      n1 = sizeof(f1) - 1;
+    memcpy(f1, sep + 1, n1);
+    f1[n1] = '\0';
+  }
+  size_t o = 0;
+  clean_copy(f0, out, cap, &o, card->cloze ? (answer ? 2 : 1) : 0);
+  if (!card->cloze && answer && f1[0]) {
+    if (o + 2 < cap) {
+      out[o++] = '\n';
+      out[o++] = '\n';
+      out[o] = '\0';
+    }
+    clean_copy(f1, out, cap, &o, 0);
+  }
+  out[o] = '\0';
+}
 
-  char buf[300];
-#if defined(_WIN32)
-  snprintf(buf, sizeof(buf), "%s/AppData/Roaming/Anki2/User 1/collection.anki2",
-           sk_resolve_user_path());
-#elif defined(__linux__)
-  snprintf(buf, sizeof(buf), "%s/.local/share/Anki2/User 1/collection.anki2",
-           sk_resolve_user_path());
-#endif
+static void draw_wrapped(const char *text, int x, int y, int max_w, int line_h,
+                         int fs, unsigned long color) {
+  if (!text || !text[0])
+    return;
+  int cx = x;
+  int cy = y;
+  const char *p = text;
+  int space_w = sk_get_text_width(" ", fs);
+  while (*p) {
+    const char *nl = strchr(p, '\n');
+    size_t seg = nl ? (size_t)(nl - p) : strlen(p);
+    size_t pos = 0;
+    cx = x;
+    while (pos < seg) {
+      while (pos < seg && isspace((unsigned char)p[pos]))
+        pos++;
+      if (pos >= seg)
+        break;
+      size_t start = pos;
+      while (pos < seg && !isspace((unsigned char)p[pos]))
+        pos++;
+      char word[256];
+      size_t len = pos - start;
+      if (len >= sizeof(word))
+        len = sizeof(word) - 1;
+      memcpy(word, p + start, len);
+      word[len] = '\0';
+      int ww = sk_get_text_width(word, fs);
+      if (cx > x && cx + ww > x + max_w) {
+        cy += line_h;
+        cx = x;
+      }
+      sk_draw_text(.text = word, .x = cx, .y = cy, .font_size = fs,
+                   .color = color, .align = "LEFT");
+      cx += ww + space_w;
+    }
+    cy += line_h;
+    if (!nl)
+      break;
+    p = nl + 1;
+  }
+}
 
+static void init_revlog_id(sqlite3 *db) {
+  if (g_revlog_init)
+    return;
+  g_revlog_init = true;
+  sqlite3_stmt *st = NULL;
+  if (q_prepare(db, "SELECT MAX(id) FROM revlog;", -1, &st, NULL) == SQLITE_OK) {
+    if (q_step(st) == SQLITE_ROW)
+      g_last_revlog_ms = (long long)q_col_i64(st, 0);
+    q_finalize(st);
+  }
+}
+
+static void grade_card(int grade, double elapsed_ms) {
+  if (!g_cards || g_card_pos < 0 || g_card_pos >= g_card_count)
+    return;
+  AnkiCard *c = &g_cards[g_card_pos];
   if (!sqlite_init())
     return;
-
+  char path[1024];
+  if (!anki_db_path(path, sizeof(path)))
+    return;
   sqlite3 *db = NULL;
-  if (p_sqlite3_open_v2(buf, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
-    if (db)
-      p_sqlite3_close(db);
+  if (!db_open(path, SQLITE_OPEN_READWRITE, &db))
     return;
-  }
+  load_crt(db);
+  init_revlog_id(db);
 
-  long long current_ivl = 0;
-  long long current_reps = 0;
-  int current_queue = 1;
-
-  sqlite3_stmt *select_stmt = NULL;
-  if (p_sqlite3_prepare_v2(db,
-                           "SELECT ivl, reps, queue FROM cards WHERE id = ?;",
-                           -1, &select_stmt, NULL) == SQLITE_OK) {
-    p_sqlite3_bind_int64(select_stmt, 1, current_card.id);
-    if (p_sqlite3_step(select_stmt) == SQLITE_ROW) {
-      current_ivl = p_sqlite3_column_int64(select_stmt, 0);
-      current_reps = p_sqlite3_column_int64(select_stmt, 1);
-      current_queue = (int)p_sqlite3_column_int64(select_stmt, 2);
+  long long ivl = c->ivl;
+  long long factor = c->factor > 0 ? c->factor : ANKI_START_FACTOR;
+  int reps = c->reps + 1;
+  int lapses = c->lapses;
+  int queue = c->queue;
+  sqlite3_stmt *cur = NULL;
+  if (q_prepare(db, "SELECT ivl, factor, reps, lapses, queue, odid FROM "
+                    "cards WHERE id = ?;",
+                -1, &cur, NULL) == SQLITE_OK) {
+    q_bind_i64(cur, 1, c->id);
+    if (q_step(cur) == SQLITE_ROW) {
+      ivl = (long long)q_col_i64(cur, 0);
+      factor = (long long)q_col_i64(cur, 1);
+      reps = (int)q_col_i64(cur, 2) + 1;
+      lapses = (int)q_col_i64(cur, 3);
+      queue = (int)q_col_i64(cur, 4);
+      c->odid = (int)q_col_i64(cur, 5);
     }
-    p_sqlite3_finalize(select_stmt);
+    q_finalize(cur);
   }
-
-  long long new_ivl = current_ivl;
-  long long new_reps = current_reps + 1;
-  int new_queue = current_queue;
-  long long due_offset_seconds = 0;
-
-  if (elapsed_s <= 3.0) {
-    if (current_queue == 1 || current_ivl < 0) {
-      if (new_reps >= 2) {
-        new_queue = 2;
-        new_ivl = 1;
-        due_offset_seconds = 86400;
-      } else {
-        new_ivl = -600;
-        due_offset_seconds = 600;
-      }
-    } else {
-      long long calculated_ivl = (long long)(current_ivl * 2.5);
-      new_ivl = calculated_ivl < 1 ? 1 : calculated_ivl;
-      due_offset_seconds = new_ivl * 86400;
-    }
-  } else {
-    if (current_queue == 1 || current_ivl < 0) {
-      new_ivl = -300;
-      due_offset_seconds = 300;
-    } else {
-      new_ivl = current_ivl + 1;
-      due_offset_seconds = new_ivl * 86400;
-    }
-  }
-
-  long long new_due = (long long)time(NULL) + due_offset_seconds;
-
-  sqlite3_stmt *update_stmt = NULL;
-  const char *sql =
-      "UPDATE cards SET ivl = ?, reps = ?, queue = ?, due = ? WHERE id = ?;";
-  if (p_sqlite3_prepare_v2(db, sql, -1, &update_stmt, NULL) == SQLITE_OK) {
-    p_sqlite3_bind_int64(update_stmt, 1, new_ivl);
-    p_sqlite3_bind_int64(update_stmt, 2, new_reps);
-    p_sqlite3_bind_int64(update_stmt, 3, new_queue);
-    p_sqlite3_bind_int64(update_stmt, 4, new_due);
-    p_sqlite3_bind_int64(update_stmt, 5, current_card.id);
-
-    if (p_sqlite3_step(update_stmt) != SQLITE_DONE) {
-      fprintf(stderr, "Failed to execute update: %s\n", p_sqlite3_errmsg(db));
-    }
-
-    p_sqlite3_finalize(update_stmt);
-  } else {
-    fprintf(stderr, "Failed to prepare update: %s\n", p_sqlite3_errmsg(db));
-  }
-
-  p_sqlite3_close(db);
-}
-static void display_card_answer(void) {
-  char answer[1024];
-  answer[0] = '\0';
-
-  TYPE_NAME card = current_card;
-
-  if (card.type == CARD_TYPE_BASIC) {
-    snprintf(answer, sizeof(answer), "%s\n---\n%s", card.data.basic.front,
-             card.data.basic.back);
-  } else if (card.type == CARD_TYPE_CLOZE) {
-    const char *src = card.data.cloze.text;
-    size_t src_len = strlen(src);
-    size_t o = 0;
-
-    size_t i = 0;
-    while (i < src_len && o + 1 < sizeof(answer)) {
-      if (src[i] == '{') {
-        size_t j = i + 1;
-        while (j < src_len && src[j] != '}')
-          j++;
-
-        if (j < src_len) {
-          const char *content_start = src + i + 1;
-          size_t content_len = j - i - 1;
-
-          const char *sep = NULL;
-          for (size_t k = 0; k + 1 < content_len; k++) {
-            if (content_start[k] == ':' && content_start[k + 1] == ':') {
-              sep = content_start + k;
-              break;
-            }
-          }
-
-          const char *ans = sep ? sep + 2 : content_start;
-          size_t ans_len =
-              sep ? (size_t)((content_start + content_len) - ans) : content_len;
-
-          for (size_t k = 0; k < ans_len && o + 1 < sizeof(answer); k++) {
-            answer[o++] = ans[k];
-          }
-          i = j + 2;
-          continue;
-        }
-      }
-      answer[o++] = src[i++];
-    }
-    answer[o] = '\0';
-  }
-
-  double elapsed_ms = sk_end_timer(q_timer);
-  fflush(stdout);
-  anki_apply_elapsed(elapsed_ms);
-
-  anki_state = ANKI_STATE_ANSWER;
-
-  sk_dismiss_message("question");
-  sk_message(.name = "answer", .message = answer, .slot = TOP_CENTER,
-             .timeout = 1000.0);
-}
-
-static void print_due_card(void) {
-  if (sk_string_contains_ci(sk_get_active_window_title(), "Anki"))
-    return;
-  sk_dismiss_message("question");
-  sk_dismiss_message("answer");
-  char buf[300];
-#if defined(_WIN32)
-  snprintf(buf, sizeof(buf), "%s/AppData/Roaming/Anki2/User 1/collection.anki2",
-           sk_resolve_user_path());
-#elif defined(__linux__)
-  snprintf(buf, sizeof(buf), "%s/.local/share/Anki2/User 1/collection.anki2",
-           sk_resolve_user_path());
-#endif
-  char deck[128];
-  sk_config_get_setting_string("Anki.Deck", deck, sizeof(deck), "Chemistry");
-  CardList list = get_cards_in_deck(buf, deck);
+  if (factor <= 0)
+    factor = ANKI_START_FACTOR;
+  int rtype = queue == 0 || queue == 1 ? 0 : (queue == 2 ? 1 : 2);
   long long now = (long long)time(NULL);
-  size_t *due = malloc(list.count * sizeof(size_t));
-  size_t due_count = 0;
-  for (size_t i = 0; i < list.count; i++) {
-    long long left = list.items[i].due_ts - now;
-    if (left <= 0)
-      due[due_count++] = i;
+  long long today = g_crt > 0 ? (now - g_crt) / 86400 : 0;
+  long long new_ivl;
+  long long due_value;
+  int new_queue;
+
+  if (rtype != 1) {
+    if (grade == 1) {
+      new_queue = rtype;
+      new_ivl = -ANKI_LEARN_STEP_1;
+      due_value = now + ANKI_LEARN_STEP_1;
+    } else if (grade == 2) {
+      long long step = ANKI_LEARN_STEP_2;
+      new_queue = rtype;
+      new_ivl = -step;
+      due_value = now + step;
+    } else {
+      new_queue = 2;
+      if (grade == 4) {
+        factor += 150;
+        new_ivl = 4;
+      } else {
+        new_ivl = 1;
+      }
+      due_value = today + new_ivl;
+    }
+  } else if (grade == 1) {
+    lapses++;
+    factor -= 200;
+    if (factor < ANKI_MIN_FACTOR)
+      factor = ANKI_MIN_FACTOR;
+    new_queue = 3;
+    new_ivl = -ANKI_LEARN_STEP_1;
+    due_value = now + ANKI_LEARN_STEP_1;
+  } else {
+    double mult;
+    if (grade == 2) {
+      factor -= 150;
+      mult = 1.2;
+    } else {
+      mult = (double)factor / 1000.0;
+      if (grade == 4) {
+        factor += 150;
+        mult *= 1.3;
+      }
+    }
+    if (factor < ANKI_MIN_FACTOR)
+      factor = ANKI_MIN_FACTOR;
+    long long base = ivl > 0 ? ivl : 1;
+    new_ivl = (long long)(base * mult);
+    if (new_ivl < 1)
+      new_ivl = 1;
+    new_queue = 2;
+    due_value = today + new_ivl;
   }
-  if (due_count == 0) {
-    printf("No due cards.\n");
-    free(due);
-    free_card_list(&list);
+
+  if (q_exec(db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
+    fprintf(stderr, "anki: cannot begin transaction: %s\n", q_errmsg(db));
+    q_close(db);
     return;
   }
-  int random = sk_rand_num_between(0, (int)(due_count - 1));
-  size_t pick = due[random];
-  TYPE_NAME card = list.items[pick];
 
-  free_card_contents(&current_card);
-  current_card = card_clone(list.items[pick]);
-  anki_state = ANKI_STATE_QUESTION;
+  char sql[256];
+  snprintf(sql, sizeof(sql),
+           "UPDATE cards SET ivl=?, factor=?, reps=?, lapses=?, queue=?, "
+           "%s=?, mod=? WHERE id=?;",
+           c->odid != 0 ? "odue" : "due");
+  sqlite3_stmt *st = NULL;
+  bool ok = q_prepare(db, sql, -1, &st, NULL) == SQLITE_OK;
+  if (ok) {
+    q_bind_i64(st, 1, new_ivl);
+    q_bind_i64(st, 2, factor);
+    q_bind_i64(st, 3, reps);
+    q_bind_i64(st, 4, lapses);
+    q_bind_i64(st, 5, new_queue);
+    q_bind_i64(st, 6, due_value);
+    q_bind_i64(st, 7, now);
+    q_bind_i64(st, 8, c->id);
+    ok = q_step(st) == SQLITE_DONE;
+    q_finalize(st);
+  }
+  if (!ok)
+    fprintf(stderr, "anki: card update failed: %s\n", q_errmsg(db));
 
-  display_card_question(card);
-  free(due);
-  free_card_list(&list);
+  long long rid = now * 1000;
+  if (rid <= g_last_revlog_ms)
+    rid = g_last_revlog_ms + 1;
+  g_last_revlog_ms = rid;
+  long long ms = elapsed_ms;
+  if (ms < 0)
+    ms = 0;
+  if (ms > 86400000)
+    ms = 86400000;
+  st = NULL;
+  if (ok && q_prepare(db, "INSERT INTO revlog (id, cid, usn, ease, ivl, "
+                          "lastIvl, factor, time, type) VALUES "
+                          "(?,?,?,?,?,?,?,?,?);",
+                      -1, &st, NULL) == SQLITE_OK) {
+    q_bind_i64(st, 1, rid);
+    q_bind_i64(st, 2, c->id);
+    q_bind_i64(st, 3, -1);
+    q_bind_i64(st, 4, grade);
+    q_bind_i64(st, 5, new_ivl);
+    q_bind_i64(st, 6, ivl);
+    q_bind_i64(st, 7, factor);
+    q_bind_i64(st, 8, ms);
+    q_bind_i64(st, 9, rtype);
+    ok = q_step(st) == SQLITE_DONE;
+    q_finalize(st);
+  }
+  if (!ok)
+    fprintf(stderr, "anki: revlog insert failed: %s\n", q_errmsg(db));
+
+  st = NULL;
+  if (ok && q_prepare(db, "UPDATE col SET mod=?;", -1, &st, NULL) ==
+                SQLITE_OK) {
+    q_bind_i64(st, 1, now);
+    ok = q_step(st) == SQLITE_DONE;
+    q_finalize(st);
+  }
+  if (!ok)
+    fprintf(stderr, "anki: collection update failed: %s\n", q_errmsg(db));
+
+  if (!ok || q_exec(db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
+    q_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+    fprintf(stderr, "anki: transaction failed: %s\n", q_errmsg(db));
+    q_close(db);
+    return;
+  }
+  q_close(db);
+
+  c->queue = new_queue;
+  c->ivl = new_ivl;
+  c->factor = factor;
+  c->reps = reps;
+  c->lapses = lapses;
+  c->due_ts = due_to_ts(now, new_queue, due_value);
 }
 
-static void handle_anki(void) {
-  AnkiState current_state = anki_state;
+static AnkiDeck *find_deck(const char *name) {
+  if (!name)
+    return NULL;
+  for (int i = 0; i < g_deck_count; i++) {
+    if (strcmp(g_decks[i].name, name) == 0)
+      return &g_decks[i];
+  }
+  return NULL;
+}
 
-  if (current_state == ANKI_STATE_QUESTION) {
-    display_card_answer();
-  } else if (current_state == ANKI_STATE_ANSWER) {
-    anki_state = ANKI_STATE_IDLE;
-    sk_dismiss_message("answer");
+static void drain_grade_keys(void) {
+  sk_is_key_pressed(SK_KEY_SPACE);
+  sk_is_key_pressed(SK_KEY_1);
+  sk_is_key_pressed(SK_KEY_2);
+  sk_is_key_pressed(SK_KEY_3);
+  sk_is_key_pressed(SK_KEY_4);
+}
+
+static void reveal_card(void) {
+  if (g_view != ANKI_VIEW_CARD || g_card_pos >= g_card_count)
+    return;
+  g_side = ANKI_SIDE_ANSWER;
+  g_answer_timer = sk_start_timer();
+  build_text(&g_cards[g_card_pos], true, g_atext, sizeof(g_atext));
+  drain_grade_keys();
+}
+
+static void next_card(void) {
+  if (g_card_pos >= g_card_count) {
+    char name[ANKI_DECK_NAME];
+    snprintf(name, sizeof(name), "%s", g_deck_name);
+    load_cards(name);
+    g_card_pos = 0;
+    if (g_card_count == 0) {
+      g_view = ANKI_VIEW_DECKS;
+      load_decks();
+      drain_grade_keys();
+      return;
+    }
+  }
+  g_side = ANKI_SIDE_QUESTION;
+  build_text(&g_cards[g_card_pos], false, g_qtext, sizeof(g_qtext));
+  drain_grade_keys();
+}
+
+static void handle_grade_keys(void) {
+  if (g_view != ANKI_VIEW_CARD || g_card_pos >= g_card_count)
+    return;
+  if (g_side == ANKI_SIDE_QUESTION) {
+    if (sk_is_key_pressed(SK_KEY_SPACE) || sk_button_clicked("show"))
+      reveal_card();
+    return;
+  }
+  int grade = 0;
+  if (sk_is_key_pressed(SK_KEY_1) || sk_button_clicked("again"))
+    grade = 1;
+  else if (sk_is_key_pressed(SK_KEY_2) || sk_button_clicked("good"))
+    grade = 2;
+  else if (sk_is_key_pressed(SK_KEY_3) || sk_button_clicked("hard"))
+    grade = 3;
+  else if (sk_is_key_pressed(SK_KEY_4) || sk_button_clicked("easy"))
+    grade = 4;
+  else if (sk_is_key_pressed(SK_KEY_SPACE))
+    grade = 3;
+  if (grade == 0)
+    return;
+  double elapsed = sk_end_timer(g_answer_timer);
+  grade_card(grade, elapsed);
+  g_card_pos++;
+  next_card();
+  sk_focus_clear();
+}
+
+static void count_remaining(int *out_new, int *out_learning, int *out_due) {
+  int new_count = 0;
+  int learning = 0;
+  int due = 0;
+  for (int i = 0; i < g_card_count; i++) {
+    int q = g_cards[i].queue;
+    if (q == 0)
+      new_count++;
+    else if (q == 1 || q == 3)
+      learning++;
+    else if (q == 2)
+      due++;
+  }
+  if (out_new)
+    *out_new = new_count;
+  if (out_learning)
+    *out_learning = learning;
+  if (out_due)
+    *out_due = due;
+}
+
+static void predict_interval(const AnkiCard *c, int grade, char *out,
+                             size_t n) {
+  long long ivl = c->ivl;
+  long long factor = c->factor > 0 ? c->factor : ANKI_START_FACTOR;
+  int rtype = c->queue == 0 || c->queue == 1 ? 0 : (c->queue == 2 ? 1 : 2);
+  long long new_ivl;
+
+  if (rtype != 1) {
+    if (grade == 1)
+      new_ivl = -ANKI_LEARN_STEP_1;
+    else if (grade == 2)
+      new_ivl = -ANKI_LEARN_STEP_2;
+    else if (grade == 4)
+      new_ivl = 4;
+    else
+      new_ivl = 1;
+  } else if (grade == 1) {
+    new_ivl = -ANKI_LEARN_STEP_1;
+  } else {
+    double mult;
+    if (grade == 2) {
+      mult = 1.2;
+    } else {
+      mult = (double)factor / 1000.0;
+      if (grade == 4)
+        mult *= 1.3;
+    }
+    long long base = ivl > 0 ? ivl : 1;
+    new_ivl = (long long)(base * mult);
+    if (new_ivl < 1)
+      new_ivl = 1;
+  }
+
+  if (new_ivl < 0) {
+    long long sec = -new_ivl;
+    if (sec < 60)
+      snprintf(out, n, "%llds", sec);
+    else if (sec < 3600)
+      snprintf(out, n, "%lldm", sec / 60);
+    else
+      snprintf(out, n, "%lldh", sec / 3600);
+  } else if (new_ivl < 30) {
+    snprintf(out, n, "%lldd", new_ivl);
+  } else if (new_ivl < 365) {
+    snprintf(out, n, "%lldmo", new_ivl / 30);
+  } else {
+    snprintf(out, n, "%lldy", new_ivl / 365);
   }
 }
 
-static bool should_swallow_anki(void) {
-  bool active = (anki_state != ANKI_STATE_IDLE);
-  return active;
+static void anki_refresh(PromptState *state) {
+  if (!state || !state->lb)
+    return;
+  if (g_view == ANKI_VIEW_CARD) {
+    if (state->lb->item_count > 0)
+      sk_populate_listbox(.lb = state->lb, .filter = NULL, .items = NULL,
+                          .count = 0);
+    return;
+  }
+  sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
+                      .items = g_deck_items, .count = g_deck_count);
+}
+
+static void anki_render(PromptState *state) {
+  if (!state)
+    return;
+  handle_grade_keys();
+  if (g_view == ANKI_VIEW_DECKS) {
+    sk_place_editbox();
+    if (!sk_listbox_begin(.lb = state->lb, .item_height = FontSize * 2))
+      return;
+    SkListItemCtx ctx;
+    while (sk_listbox_next(&ctx)) {
+      sk_draw_text(.text = ctx.text, .x = ctx.x + 12, .y = ctx.y + 4,
+                   .font_size = FontSize, .align = "LEFT");
+      const AnkiDeck *d = find_deck(ctx.text);
+      if (d) {
+        char count[64];
+        snprintf(count, sizeof(count), "%d due", d->due);
+        sk_draw_text(.text = count, .x = state->width - 16, .y = ctx.y,
+                     .font_size = 23, .align = "RIGHT", .color = ANKI_SUB_COLOR);
+      }
+    }
+    sk_listbox_end();
+    return;
+  }
+
+  const char *label = g_side == ANKI_SIDE_QUESTION ? "Question" : "Answer";
+  sk_draw_text(.text = label, .y = 14, .font_size = 23,
+               .color = ANKI_SUB_COLOR, .align = "CENTER");
+
+  const char *body = g_side == ANKI_SIDE_QUESTION ? g_qtext : g_atext;
+  draw_wrapped(body, 24, state->height / 2 - strlen(body), state->width - 48, FontSize + 16, FontSize + 16,
+               COLOR_TEXT);
+  if (g_side == ANKI_SIDE_ANSWER) {
+    sk_place_button(.name="again",.text="Again",.x=154,.h=50,.y=state->height-76);
+    sk_place_button(.name="hard",.text="Hard",.x=304,.h=50,.y=state->height-76);
+    sk_place_button(.name="good",.text="Good",.x=454,.h=50,.y=state->height-76);
+    sk_place_button(.name="easy",.text="Easy",.x=604,.h=50,.y=state->height-76);
+    char iv_again[16] = "", iv_hard[16] = "", iv_good[16] = "",
+         iv_easy[16] = "";
+    if (g_card_pos < g_card_count) {
+      const AnkiCard *card = &g_cards[g_card_pos];
+      predict_interval(card, 1, iv_again, sizeof(iv_again));
+      predict_interval(card, 2, iv_hard, sizeof(iv_hard));
+      predict_interval(card, 3, iv_good, sizeof(iv_good));
+      predict_interval(card, 4, iv_easy, sizeof(iv_easy));
+    }
+    sk_draw_text(.text = iv_again, .x = 184, .y = state->height - 110);
+    sk_draw_text(.text = iv_hard, .x = 334, .y = state->height - 110);
+    sk_draw_text(.text = iv_good, .x = 494, .y = state->height - 110);
+    sk_draw_text(.text = iv_easy, .x = 644, .y = state->height - 110);
+  } else {
+    int new_count = 0, learning = 0, due = 0;
+    count_remaining(&new_count, &learning, &due);
+    char new_buf[16], learning_buf[16], due_buf[16];
+    snprintf(new_buf, sizeof(new_buf), "%d", new_count);
+    snprintf(learning_buf, sizeof(learning_buf), "%d", learning);
+    snprintf(due_buf, sizeof(due_buf), "%d", due);
+    SkTextSegment segments[5] = {
+        {new_buf, SK_BLUE},      {" + ", ANKI_SUB_COLOR}, {learning_buf, SK_RED},
+        {" + ", ANKI_SUB_COLOR}, {due_buf, SK_GREEN},
+    };
+    sk_draw_text_segments(.segments = segments, .count = 5, .x = 435,
+                          .y = state->height - 108, .font_size = 20,
+                          .color = ANKI_SUB_COLOR, .align = "CENTER");
+    sk_place_button(.name="show",.text="Show Answer",.x=360,.h=50,.w=150,.y=state->height-76);
+  }
+}
+
+static bool anki_enter(PromptState *state) {
+  if (!state)
+    return false;
+  if (g_view == ANKI_VIEW_CARD) {
+    reveal_card();
+    return false;
+  }
+  if (!sk_is_selected(state->lb) || !state->lb->selected_text)
+    return false;
+  const char *sel = state->lb->selected_text;
+  load_cards(sel);
+  g_view = ANKI_VIEW_CARD;
+  g_card_pos = 0;
+  if (g_card_count == 0) {
+    sk_message(.message = "No due cards in this deck.", .slot = TOP_CENTER,
+               .timeout = 2.0);
+    g_view = ANKI_VIEW_DECKS;
+    load_decks();
+    return false;
+  }
+  g_side = ANKI_SIDE_QUESTION;
+  build_text(&g_cards[0], false, g_qtext, sizeof(g_qtext));
+  sk_set_edit_text("");
+  if (state->lb->item_count)
+    sk_populate_listbox(.lb = state->lb, .filter = NULL, .items = NULL,
+                        .count = 0);
+  drain_grade_keys();
+  return false;
+}
+
+static void anki_on_close(void) {
+  g_view = ANKI_VIEW_DECKS;
+  free_cards();
+  free_decks();
+}
+
+static void open_anki(void) {
+  load_decks();
+  if (sk_process_running("anki")) {
+    sk_message(.slot=TOP_CENTER,.message="Anki is currently running please close it and try again"); 
+    return;
+  } 
+
+  sk_window(.title = "Anki", .placeholder = "Decks", .refresh = anki_refresh,
+            .render = anki_render, .enter = anki_enter,
+            .on_close = anki_on_close);
+}
+
+SKALD_FEATURE_SHUTDOWN {
+  free_cards();
+  free_decks();
+  if (g_sqlite_lib) {
+    sk_library_close(g_sqlite_lib);
+    g_sqlite_lib = NULL;
+  }
 }
 
 SKALD_FEATURE_INIT {
-  srand((time(NULL)));
-  sk_register_hotkey(.hotkey = "Shift+Space", .cb = handle_anki,
-                     .should_swallow = should_swallow_anki);
-
-  SkSettingsEntry *entry =
-      sk_add_settings_entry(.name = "Anki", .icon = "/anki.png",
-                            .desc = "Anki deck and review settings.");
-  SkSettingsEditboxField deck_field = {.name = "deck",
-                                       .label = "Deck:",
-                                       .config_key = "Anki.Deck",
-                                       .default_value = "Chemistry",
-                                       .type = SK_SETTINGS_EDITBOX_STRING};
-  sk_settings_entry_add_editbox(entry, .title = "Deck Name",
-                                .sub = "Anki deck to read due cards from.",
-                                .fields = &deck_field, .field_count = 1);
-  SkSettingsEditboxField interval_field = {.name = "interval",
-                                           .label = "Seconds:",
-                                           .config_key = "Anki.Interval",
-                                           .default_value = "10",
-                                           .type = SK_SETTINGS_EDITBOX_INT,
-                                           .min_value = 1.0f};
-  sk_settings_entry_add_editbox(entry, .title = "Auto-Show Interval",
-                                .sub =
-                                    "Seconds between automatic card prompts.",
-                                .fields = &interval_field, .field_count = 1);
+  sk_register_hotkey(.hotkey="Alt+N",.cb=open_anki);
+  sk_add_feature(.display_name = "Anki", .on_action = open_anki,
+                 .icon = "/anki.png");
 }

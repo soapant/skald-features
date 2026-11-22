@@ -78,8 +78,6 @@ static void trigger_zoxide(void) {
 }
 
 SKALD_FEATURE_INIT {
-  sk_register_hotkey(.hotkey = "Alt+W", .cb = trigger_zoxide);
-
   sk_add_feature(.display_name = "Zoxide", .on_action = trigger_zoxide,
                  .icon = "/folder.png");
 }

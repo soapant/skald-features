@@ -350,7 +350,7 @@ static bool pk_enter_callback(PromptState *state) {
 }
 
 static void pk_refresh_callback(PromptState *state) {
-  pk_last_collect = sk_start_timer();
+  pk_last_collect = sk_timer_start();
   pk_collect_started = true;
  pk_collect_and_sort();
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
@@ -365,9 +365,9 @@ static void pk_refresh_callback(PromptState *state) {
 static void pk_render_callback(PromptState *state) {
   if (!state)
     return;
-  double since = pk_collect_started ? sk_end_timer(pk_last_collect) : 1e9;
+  double since = pk_collect_started ? sk_timer_end(pk_last_collect) : 1e9;
   if (since >= pk_refresh_ms()) {
-    pk_last_collect = sk_start_timer();
+    pk_last_collect = sk_timer_start();
     pk_collect_started = true;
     int keep = state->lb->selected_index;
     sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,

@@ -347,7 +347,7 @@ static void net_usage_save(void) {
 
 static void net_usage_sample(void) {
   unsigned long long total_rx = sk_net_rx_bytes();
-  double elapsed = sk_end_timer(net_last_sample);
+  double elapsed = sk_timer_end(net_last_sample);
   if (net.have_baseline && total_rx >= net.last_total_rx && elapsed > 0.05) {
     double delta = (double)(total_rx - net.last_total_rx);
     double inst = delta / elapsed;
@@ -363,15 +363,15 @@ static void net_usage_sample(void) {
   }
   net.last_total_rx = total_rx;
   net.have_baseline = 1;
-  net_last_sample = sk_start_timer();
+  net_last_sample = sk_timer_start();
 }
 
 static SkTimer net_last_tick;
 
 static void net_usage_tick(void) {
-  if (sk_end_timer(net_last_tick) < s_net_sample_interval_ms)
+  if (sk_timer_end(net_last_tick) < s_net_sample_interval_ms)
     return;
-  net_last_tick = sk_start_timer();
+  net_last_tick = sk_timer_start();
   net_usage_load();
 
   time_t now = time(NULL);
@@ -380,9 +380,9 @@ static void net_usage_tick(void) {
   net_usage_reset_day(&net, tm_now.tm_mday, tm_now.tm_mon);
   net_usage_sample();
 
-  if (sk_end_timer(net_last_save) >= (double)NET_SAVE_EVERY_SEC * 1000.0) {
+  if (sk_timer_end(net_last_save) >= (double)NET_SAVE_EVERY_SEC * 1000.0) {
     net_usage_save();
-    net_last_save = sk_start_timer();
+    net_last_save = sk_timer_start();
   }
 }
 

@@ -14,7 +14,7 @@
 #define ANKI_LEARN_STEP_2 600
 #define ANKI_START_FACTOR 2500
 #define ANKI_MIN_FACTOR 1300
-#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.32f)
+#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.82f)
 
 typedef struct {
   long long id;
@@ -35,12 +35,20 @@ typedef struct {
   char *flds;
 } AnkiCard;
 
-typedef enum { ANKI_VIEW_DECKS, ANKI_VIEW_CARD } AnkiView;
+typedef enum { ANKI_VIEW_DECKS, ANKI_VIEW_CARD, ANKI_VIEW_INFO } AnkiView;
 typedef enum { ANKI_SIDE_QUESTION, ANKI_SIDE_ANSWER } AnkiSide;
 
 static AnkiView g_view = ANKI_VIEW_DECKS;
 static AnkiSide g_side = ANKI_SIDE_QUESTION;
+static bool g_focus_mode;
+static SkTimer g_session_timer;
+static double g_today_ms;
+static int g_today_reviewed;
+static int g_today_again;
+static int g_today_day;
 static long long g_crt = 0;
+
+static void stats_check_day(void);
 
 static AnkiDeck *g_decks;
 static const char **g_deck_items;
@@ -56,6 +64,13 @@ static char g_deck_name[ANKI_DECK_NAME];
 static SkTimer g_answer_timer;
 static char g_qtext[ANKI_TEXT_CAP];
 static char g_atext[ANKI_TEXT_CAP];
+static char g_abody[ANKI_TEXT_CAP];
+
+#define ANKI_CLOZE_SEGS 128
+static SkTextSegment g_cloze_segs[ANKI_CLOZE_SEGS];
+static int g_cloze_seg_count;
+static char g_cloze_pool[ANKI_TEXT_CAP];
+static size_t g_cloze_pool_len;
 static long long g_last_revlog_ms;
 static bool g_revlog_init;
 
@@ -556,47 +571,129 @@ static void build_text(const AnkiCard *card, bool answer, char *out,
   out[o] = '\0';
 }
 
-static void draw_wrapped(const char *text, int x, int y, int max_w, int line_h,
-                         int fs, unsigned long color) {
-  if (!text || !text[0])
+static void build_answer_only(const AnkiCard *card, char *out, size_t cap) {
+  out[0] = '\0';
+  if (!card || !card->flds)
     return;
-  int cx = x;
-  int cy = y;
-  const char *p = text;
-  int space_w = sk_get_text_width(" ", fs);
-  while (*p) {
-    const char *nl = strchr(p, '\n');
-    size_t seg = nl ? (size_t)(nl - p) : strlen(p);
-    size_t pos = 0;
-    cx = x;
-    while (pos < seg) {
-      while (pos < seg && isspace((unsigned char)p[pos]))
-        pos++;
-      if (pos >= seg)
-        break;
-      size_t start = pos;
-      while (pos < seg && !isspace((unsigned char)p[pos]))
-        pos++;
-      char word[256];
-      size_t len = pos - start;
-      if (len >= sizeof(word))
-        len = sizeof(word) - 1;
-      memcpy(word, p + start, len);
-      word[len] = '\0';
-      int ww = sk_get_text_width(word, fs);
-      if (cx > x && cx + ww > x + max_w) {
-        cy += line_h;
-        cx = x;
-      }
-      sk_draw_text(.text = word, .x = cx, .y = cy, .font_size = fs,
-                   .color = color, .align = "LEFT");
-      cx += ww + space_w;
-    }
-    cy += line_h;
-    if (!nl)
-      break;
-    p = nl + 1;
+  const char *sep = strchr(card->flds, '\x1f');
+  size_t n0 = sep ? (size_t)(sep - card->flds) : strlen(card->flds);
+  if (n0 >= ANKI_TEXT_CAP)
+    n0 = ANKI_TEXT_CAP - 1;
+  char f0[ANKI_TEXT_CAP];
+  memcpy(f0, card->flds, n0);
+  f0[n0] = '\0';
+  size_t o = 0;
+  if (card->cloze) {
+    clean_copy(f0, out, cap, &o, 2);
+  } else if (sep) {
+    char f1[ANKI_TEXT_CAP];
+    size_t n1 = strlen(sep + 1);
+    if (n1 >= sizeof(f1))
+      n1 = sizeof(f1) - 1;
+    memcpy(f1, sep + 1, n1);
+    f1[n1] = '\0';
+    clean_copy(f1, out, cap, &o, 0);
   }
+  out[o] = '\0';
+}
+
+static void cloze_add_piece(const char *s, size_t len, ColorRef color) {
+  if (g_cloze_seg_count >= ANKI_CLOZE_SEGS || !s || !len)
+    return;
+  char raw[ANKI_TEXT_CAP];
+  char clean[ANKI_TEXT_CAP];
+  size_t n = len < sizeof(raw) - 1 ? len : sizeof(raw) - 1;
+  memcpy(raw, s, n);
+  raw[n] = '\0';
+  size_t o = 0;
+  clean_copy(raw, clean, sizeof(clean), &o, 0);
+  if (o == 0)
+    return;
+  if (o + 1 > sizeof(g_cloze_pool) - g_cloze_pool_len)
+    return;
+  memcpy(g_cloze_pool + g_cloze_pool_len, clean, o + 1);
+  g_cloze_segs[g_cloze_seg_count].text = g_cloze_pool + g_cloze_pool_len;
+  g_cloze_segs[g_cloze_seg_count].color = color;
+  g_cloze_seg_count++;
+  g_cloze_pool_len += o + 1;
+}
+
+static void build_cloze_segments(const AnkiCard *card) {
+  g_cloze_seg_count = 0;
+  g_cloze_pool_len = 0;
+  if (!card || !card->flds)
+    return;
+  const char *sep = strchr(card->flds, '\x1f');
+  size_t n0 = sep ? (size_t)(sep - card->flds) : strlen(card->flds);
+  if (n0 > ANKI_TEXT_CAP - 1)
+    n0 = ANKI_TEXT_CAP - 1;
+  char f0[ANKI_TEXT_CAP];
+  memcpy(f0, card->flds, n0);
+  f0[n0] = '\0';
+
+  size_t pos = 0;
+  while (pos < n0) {
+    const char *open = strstr(f0 + pos, "{{c");
+    if (!open) {
+      cloze_add_piece(f0 + pos, n0 - pos, ANKI_SUB_COLOR);
+      break;
+    }
+    size_t start = (size_t)(open - f0);
+    if (start > pos)
+      cloze_add_piece(f0 + pos, start - pos, ANKI_SUB_COLOR);
+    const char *close = strstr(open, "}}");
+    if (!close) {
+      cloze_add_piece(f0 + start, n0 - start, ANKI_SUB_COLOR);
+      break;
+    }
+    size_t inner_len = (size_t)(close - (open + 2));
+    const char *inner = open + 2;
+    size_t p = 0;
+    while (p < inner_len && (inner[p] == 'c' || inner[p] == 'C'))
+      p++;
+    while (p < inner_len && isdigit((unsigned char)inner[p]))
+      p++;
+    size_t sep1 = SIZE_MAX;
+    size_t sep2 = SIZE_MAX;
+    for (size_t i = p; i + 1 < inner_len; i++) {
+      if (inner[i] == ':' && inner[i + 1] == ':') {
+        sep1 = i + 2;
+        break;
+      }
+    }
+    if (sep1 != SIZE_MAX) {
+      for (size_t i = sep1; i + 1 < inner_len; i++) {
+        if (inner[i] == ':' && inner[i + 1] == ':') {
+          sep2 = i;
+          break;
+        }
+      }
+    }
+    size_t astart = sep1 != SIZE_MAX ? sep1 : p;
+    size_t aend = sep2 != SIZE_MAX ? sep2 : inner_len;
+    if (aend > astart)
+      cloze_add_piece(inner + astart, aend - astart, 0);
+    pos = (size_t)(close - f0) + 2;
+  }
+}
+
+static int measure_main_text(int max_w, int line_h, int fs,
+                             bool cloze_answer, bool is_question) {
+  if (cloze_answer)
+    return sk_draw_text_wrapped(.segments = g_cloze_segs,
+                                .count = g_cloze_seg_count, .y = 0,
+                                .max_width = max_w, .line_height = line_h,
+                                .font_size = fs, .measure_only = true);
+  int height = sk_draw_text_wrapped(.text = g_qtext, .y = 0,
+                                    .max_width = max_w, .line_height = line_h,
+                                    .font_size = fs, .measure_only = true);
+  if (!is_question && g_abody[0])
+    height += fs + sk_draw_text_wrapped(.text = g_abody, .y = 0,
+                                        .max_width = max_w,
+                                        .line_height = line_h,
+                                        .font_size = fs,
+                                        .measure_only = true);
+  return height;
 }
 
 static void init_revlog_id(sqlite3 *db) {
@@ -810,8 +907,11 @@ static void reveal_card(void) {
   if (g_view != ANKI_VIEW_CARD || g_card_pos >= g_card_count)
     return;
   g_side = ANKI_SIDE_ANSWER;
-  g_answer_timer = sk_start_timer();
+  g_answer_timer = sk_timer_start();
   build_text(&g_cards[g_card_pos], true, g_atext, sizeof(g_atext));
+  build_answer_only(&g_cards[g_card_pos], g_abody, sizeof(g_abody));
+  if (g_cards[g_card_pos].cloze)
+    build_cloze_segments(&g_cards[g_card_pos]);
   drain_grade_keys();
 }
 
@@ -854,7 +954,11 @@ static void handle_grade_keys(void) {
     grade = 3;
   if (grade == 0)
     return;
-  double elapsed = sk_end_timer(g_answer_timer);
+  stats_check_day();
+  g_today_reviewed++;
+  if (grade == 1)
+    g_today_again++;
+  double elapsed = sk_timer_end(g_answer_timer);
   grade_card(grade, elapsed);
   g_card_pos++;
   next_card();
@@ -935,7 +1039,7 @@ static void predict_interval(const AnkiCard *c, int grade, char *out,
 static void anki_refresh(PromptState *state) {
   if (!state || !state->lb)
     return;
-  if (g_view == ANKI_VIEW_CARD) {
+  if (g_view != ANKI_VIEW_DECKS) {
     if (state->lb->item_count > 0)
       sk_populate_listbox(.lb = state->lb, .filter = NULL, .items = NULL,
                           .count = 0);
@@ -945,9 +1049,140 @@ static void anki_refresh(PromptState *state) {
                       .items = g_deck_items, .count = g_deck_count);
 }
 
+static int stats_day_key(void) {
+  time_t now = time(NULL);
+  struct tm *local = localtime(&now);
+  if (!local)
+    return 0;
+  return (local->tm_year + 1900) * 10000 + (local->tm_mon + 1) * 100 +
+         local->tm_mday;
+}
+
+static void stats_check_day(void) {
+  int day = stats_day_key();
+  if (g_today_day == day)
+    return;
+  g_today_day = day;
+  g_today_ms = 0;
+  g_today_reviewed = 0;
+  g_today_again = 0;
+}
+
+static void stats_format_duration(double ms, char *out, size_t n) {
+  long long total = ms > 0 ? (long long)(ms / 1000.0) : 0;
+  long long hours = total / 3600;
+  long long minutes = (total % 3600) / 60;
+  long long seconds = total % 60;
+  if (hours > 0)
+    snprintf(out, n, "%lldh %lldm %llds", hours, minutes, seconds);
+  else if (minutes > 0)
+    snprintf(out, n, "%lldm %llds", minutes, seconds);
+  else
+    snprintf(out, n, "%llds", seconds);
+}
+
+static void anki_info_render(PromptState *state) {
+  (void)state;
+  stats_check_day();
+  int fs = FontSize + 6;
+  int lh = fs + 14;
+  int y = 80;
+  int x = 20;
+  sk_draw_rect(.x=x - 5,.y=y - 5,.w=420,.h=270,.filled=true,.color=sk_color_lerp(COLOR_BG,SK_BLACK,0.6f),.radius=6);
+  sk_draw_text(.text = "Today:", .x = x, .y = y, .font_size = FontSize + 12,
+               .color = sk_color_lerp(COLOR_BG,SK_BLUE,0.5f), .align = "LEFT");
+  y += lh + 10;
+
+  char time_buf[64], reviewed_buf[32], again_buf[32], pct_buf[32],
+      per_card_buf[64];
+  stats_format_duration(g_today_ms, time_buf, sizeof(time_buf));
+  snprintf(reviewed_buf, sizeof(reviewed_buf), "%d", g_today_reviewed);
+  snprintf(again_buf, sizeof(again_buf), "%d", g_today_again);
+  int correct = g_today_reviewed > 0
+                    ? (g_today_reviewed - g_today_again) * 100 /
+                          g_today_reviewed
+                    : 0;
+  snprintf(pct_buf, sizeof(pct_buf), "%d%%", correct);
+  if (g_today_reviewed > 0)
+    stats_format_duration(g_today_ms / g_today_reviewed, per_card_buf,
+                          sizeof(per_card_buf));
+  else
+    snprintf(per_card_buf, sizeof(per_card_buf), "-");
+
+  struct {
+    const char *label;
+    const char *value;
+  } rows[] = {
+      {"Time Spent:", time_buf},
+      {"Cards Reviewed:", reviewed_buf},
+      {"Again:", again_buf},
+      {"Correct:", pct_buf},
+      {"Time Per Card:", per_card_buf},
+  };
+  for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+    sk_draw_text(.text = rows[i].label, .x = x, .y = y, .font_size = fs,
+                 .color = sk_color_lerp(COLOR_BG,SK_WHITE,0.6f), .align = "LEFT");
+    sk_draw_text(.text = rows[i].value, .x = 340, .y = y, .font_size = fs, .align = "LEFT");
+    y += lh;
+  }
+}
+
+static void anki_go_to_decks(PromptState *state) {
+  free_cards();
+  load_decks();
+  g_view = ANKI_VIEW_DECKS;
+  g_focus_mode = false;
+  sk_focus_clear();
+  drain_grade_keys();
+  memset(state->eb->filter, 0, sizeof(state->eb->filter));
+  sk_request_refresh();
+}
+
 static void anki_render(PromptState *state) {
   if (!state)
     return;
+  if (g_view == ANKI_VIEW_CARD && sk_is_key_pressed(SK_KEY_F))
+    g_focus_mode = !g_focus_mode;
+  if (g_view == ANKI_VIEW_INFO) {
+    bool decks_clicked = sk_button_clicked("decks");
+    sk_place_button(.name="decks",.text="Decks",.x=24,.y=24,.w=100,.h=40);
+    anki_info_render(state);
+    if (decks_clicked || sk_is_key_pressed(SK_KEY_D)) {
+      anki_go_to_decks(state);
+      return;
+    }
+    return;
+  }
+  if (g_view == ANKI_VIEW_CARD) {
+    if (sk_is_key_pressed(SK_KEY_I)) {
+      g_view = ANKI_VIEW_INFO;
+      g_focus_mode = false;
+      sk_focus_clear();
+      sk_request_refresh();
+      return;
+    }
+    if (sk_is_key_pressed(SK_KEY_D)) {
+      anki_go_to_decks(state);
+      return;
+    }
+    bool decks_clicked = sk_button_clicked("decks");
+    bool info_clicked = sk_button_clicked("info");
+    if (!g_focus_mode) {
+      sk_place_button(.name="decks",.text="Decks",.x=24,.y=24,.w=100,.h=40);
+      sk_place_button(.name="info",.text="Info",.x=132,.y=24,.w=100,.h=40);
+    }
+    if (decks_clicked) {
+      anki_go_to_decks(state);
+      return;
+    }
+    if (info_clicked) {
+      g_view = ANKI_VIEW_INFO;
+      g_focus_mode = false;
+      sk_focus_clear();
+      sk_request_refresh();
+      return;
+    }
+  }
   handle_grade_keys();
   if (g_view == ANKI_VIEW_DECKS) {
     sk_place_editbox();
@@ -969,46 +1204,79 @@ static void anki_render(PromptState *state) {
     return;
   }
 
-  const char *label = g_side == ANKI_SIDE_QUESTION ? "Question" : "Answer";
-  sk_draw_text(.text = label, .y = 14, .font_size = 23,
-               .color = ANKI_SUB_COLOR, .align = "CENTER");
-
-  const char *body = g_side == ANKI_SIDE_QUESTION ? g_qtext : g_atext;
-  draw_wrapped(body, 24, state->height / 2 - strlen(body), state->width - 48, FontSize + 16, FontSize + 16,
-               COLOR_TEXT);
-  if (g_side == ANKI_SIDE_ANSWER) {
-    sk_place_button(.name="again",.text="Again",.x=154,.h=50,.y=state->height-76);
-    sk_place_button(.name="hard",.text="Hard",.x=304,.h=50,.y=state->height-76);
-    sk_place_button(.name="good",.text="Good",.x=454,.h=50,.y=state->height-76);
-    sk_place_button(.name="easy",.text="Easy",.x=604,.h=50,.y=state->height-76);
-    char iv_again[16] = "", iv_hard[16] = "", iv_good[16] = "",
-         iv_easy[16] = "";
-    if (g_card_pos < g_card_count) {
-      const AnkiCard *card = &g_cards[g_card_pos];
-      predict_interval(card, 1, iv_again, sizeof(iv_again));
-      predict_interval(card, 2, iv_hard, sizeof(iv_hard));
-      predict_interval(card, 3, iv_good, sizeof(iv_good));
-      predict_interval(card, 4, iv_easy, sizeof(iv_easy));
-    }
-    sk_draw_text(.text = iv_again, .x = 184, .y = state->height - 110);
-    sk_draw_text(.text = iv_hard, .x = 334, .y = state->height - 110);
-    sk_draw_text(.text = iv_good, .x = 494, .y = state->height - 110);
-    sk_draw_text(.text = iv_easy, .x = 644, .y = state->height - 110);
+  bool is_question = g_side == ANKI_SIDE_QUESTION;
+  bool cloze_answer = !is_question && g_card_pos < g_card_count &&
+                      g_cards[g_card_pos].cloze;
+  int max_w = state->width - 48;
+  int top_margin = 16;
+  int bottom_margin = g_focus_mode ? 16 : 130;
+  int avail_h = state->height - top_margin - bottom_margin;
+  if (avail_h < 40)
+    avail_h = 40;
+  int main_fs = FontSize + 16 + (g_focus_mode ? 10 : 0);
+  int text_h = measure_main_text(max_w, main_fs, main_fs, cloze_answer,
+                                 is_question);
+  while (text_h > avail_h && main_fs > 12) {
+    main_fs -= 2;
+    text_h = measure_main_text(max_w, main_fs, main_fs, cloze_answer,
+                               is_question);
+  }
+  int body_y = top_margin;
+  if (text_h < avail_h)
+    body_y += (avail_h - text_h) / 2;
+  if (cloze_answer) {
+    sk_draw_text_wrapped(.segments = g_cloze_segs, .count = g_cloze_seg_count,
+                         .x = 24, .y = body_y, .max_width = max_w,
+                         .line_height = main_fs, .font_size = main_fs,
+                         .color = COLOR_TEXT, .align = "LEFT");
   } else {
-    int new_count = 0, learning = 0, due = 0;
-    count_remaining(&new_count, &learning, &due);
-    char new_buf[16], learning_buf[16], due_buf[16];
-    snprintf(new_buf, sizeof(new_buf), "%d", new_count);
-    snprintf(learning_buf, sizeof(learning_buf), "%d", learning);
-    snprintf(due_buf, sizeof(due_buf), "%d", due);
-    SkTextSegment segments[5] = {
-        {new_buf, SK_BLUE},      {" + ", ANKI_SUB_COLOR}, {learning_buf, SK_RED},
-        {" + ", ANKI_SUB_COLOR}, {due_buf, SK_GREEN},
-    };
-    sk_draw_text_segments(.segments = segments, .count = 5, .x = 435,
-                          .y = state->height - 108, .font_size = 20,
-                          .color = ANKI_SUB_COLOR, .align = "CENTER");
-    sk_place_button(.name="show",.text="Show Answer",.x=360,.h=50,.w=150,.y=state->height-76);
+    int next_y = sk_draw_text_wrapped(.text = g_qtext, .x = 24, .y = body_y,
+                                      .max_width = max_w,
+                                      .line_height = main_fs,
+                                      .font_size = main_fs,
+                                      .color = ANKI_SUB_COLOR, .align = "LEFT");
+    if (!is_question && g_abody[0])
+      sk_draw_text_wrapped(.text = g_abody, .x = 24, .y = next_y + main_fs,
+                           .max_width = max_w, .line_height = main_fs,
+                           .font_size = main_fs, .color = COLOR_TEXT,
+                           .align = "LEFT");
+  }
+  if (!g_focus_mode) {
+    if (g_side == ANKI_SIDE_ANSWER) {
+      sk_place_button(.name="again",.text="Again",.x=154,.h=50,.y=state->height-76);
+      sk_place_button(.name="hard",.text="Hard",.x=304,.h=50,.y=state->height-76);
+      sk_place_button(.name="good",.text="Good",.x=454,.h=50,.y=state->height-76);
+      sk_place_button(.name="easy",.text="Easy",.x=604,.h=50,.y=state->height-76);
+
+      char iv_again[16] = "", iv_hard[16] = "", iv_good[16] = "",
+           iv_easy[16] = "";
+      if (g_card_pos < g_card_count) {
+        const AnkiCard *card = &g_cards[g_card_pos];
+        predict_interval(card, 1, iv_again, sizeof(iv_again));
+        predict_interval(card, 2, iv_hard, sizeof(iv_hard));
+        predict_interval(card, 3, iv_good, sizeof(iv_good));
+        predict_interval(card, 4, iv_easy, sizeof(iv_easy));
+      }
+      sk_draw_text(.text = iv_again, .x = 184, .y = state->height - 110);
+      sk_draw_text(.text = iv_hard, .x = 344, .y = state->height - 110);
+      sk_draw_text(.text = iv_good, .x = 494, .y = state->height - 110);
+      sk_draw_text(.text = iv_easy, .x = 644, .y = state->height - 110);
+    } else {
+      int new_count = 0, learning = 0, due = 0;
+      count_remaining(&new_count, &learning, &due);
+      char new_buf[16], learning_buf[16], due_buf[16];
+      snprintf(new_buf, sizeof(new_buf), "%d", new_count);
+      snprintf(learning_buf, sizeof(learning_buf), "%d", learning);
+      snprintf(due_buf, sizeof(due_buf), "%d", due);
+      SkTextSegment segments[5] = {
+          {new_buf, SK_BLUE},      {" + ", ANKI_SUB_COLOR}, {learning_buf, SK_RED},
+          {" + ", ANKI_SUB_COLOR}, {due_buf, SK_GREEN},
+      };
+      sk_draw_text_segments(.segments = segments, .count = 5, .x = 435,
+                            .y = state->height - 108, .font_size = 20,
+                            .color = ANKI_SUB_COLOR, .align = "CENTER");
+      sk_place_button(.name="show",.text="Show Answer",.x=360,.h=50,.w=150,.y=state->height-76);
+    }
   }
 }
 
@@ -1019,11 +1287,14 @@ static bool anki_enter(PromptState *state) {
     reveal_card();
     return false;
   }
+  if (g_view == ANKI_VIEW_INFO)
+    return false;
   if (!sk_is_selected(state->lb) || !state->lb->selected_text)
     return false;
   const char *sel = state->lb->selected_text;
   load_cards(sel);
   g_view = ANKI_VIEW_CARD;
+  g_focus_mode = false;
   g_card_pos = 0;
   if (g_card_count == 0) {
     sk_message(.message = "No due cards in this deck.", .slot = TOP_CENTER,
@@ -1043,7 +1314,12 @@ static bool anki_enter(PromptState *state) {
 }
 
 static void anki_on_close(void) {
+  stats_check_day();
+  double ms = sk_timer_end(g_session_timer);
+  if (ms > 0)
+    g_today_ms += ms;
   g_view = ANKI_VIEW_DECKS;
+  g_focus_mode = false;
   free_cards();
   free_decks();
 }
@@ -1055,6 +1331,8 @@ static void open_anki(void) {
     return;
   } 
 
+  stats_check_day();
+  g_session_timer = sk_timer_start();
   sk_window(.title = "Anki", .placeholder = "Decks", .refresh = anki_refresh,
             .render = anki_render, .enter = anki_enter,
             .on_close = anki_on_close);

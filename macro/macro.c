@@ -67,14 +67,14 @@ static SkTimer macro_clock;
 static bool macro_clock_valid = false;
 
 static void macro_clock_reset(void) {
-  macro_clock = sk_start_timer();
+  macro_clock = sk_timer_start();
   macro_clock_valid = true;
 }
 
 static unsigned long macro_now_us(void) {
   if (!macro_clock_valid)
     macro_clock_reset();
-  double ms = sk_end_timer(macro_clock);
+  double ms = sk_timer_end(macro_clock);
   if (ms < 0.0)
     ms = 0.0;
   return (unsigned long long)(ms * 1000.0);
@@ -234,12 +234,12 @@ static void *playback_loop(void *arg) {
     if (event_count == 0)
       break;
     unsigned long long t0 = events[0].t_us;
-    SkTimer start = sk_start_timer();
+    SkTimer start = sk_timer_start();
     held_count = 0;
     for (int i = 0; i < event_count && playing; i++) {
       const MacroEvent *m = &events[i];
       double target_ms = (double)(m->t_us - t0) / 1000.0;
-      double cur_ms = sk_end_timer(start);
+      double cur_ms = sk_timer_end(start);
       double wait_ms = target_ms - cur_ms;
       if (sk_config_get_setting_bool(MACRO_REMOVE_DEAD_TIME_KEY) &&
           wait_ms > DEAD_TIME_LIMIT)
@@ -507,10 +507,10 @@ static void macro_select_current(const char *option, int index) {
 
 SKALD_FEATURE_INIT {
   init_macros();
-  sk_register_config_hotkey(.name = "Record Macro", .key = "macro.record",
+  sk_register_config_hotkey(.name = "Record Macro", .key = "Macro.record",
                             .default_hotkey = "Ctrl+Alt+R",
                             .cb = record_toggle);
-  sk_register_config_hotkey(.name = "Play Macro", .key = "macro.play",
+  sk_register_config_hotkey(.name = "Play Macro", .key = "Macro.play",
                             .default_hotkey = "Ctrl+Alt+P", .cb = PlayMacro);
 
   sk_add_to_cc(.display_name = "Save Macro", .on_action = SaveMacro,

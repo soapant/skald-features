@@ -1319,15 +1319,15 @@ static void typing_test_render(PromptState *state) {
       }
     } else if (c != 0) {
       if (!session_running) {
-        session_timer = sk_start_timer();
+        session_timer = sk_timer_start();
         session_running = true;
       }
 
       if (!timer_running) {
-        current_timer = sk_start_timer();
+        current_timer = sk_timer_start();
         timer_running = true;
       } else {
-        current_timer = sk_start_timer();
+        current_timer = sk_timer_start();
       }
 
       total_typed++;
@@ -1407,7 +1407,7 @@ static void typing_test_render(PromptState *state) {
     if (session_running) {
       session_running = false;
 
-      double elapsed_ms = sk_end_timer(session_timer);
+      double elapsed_ms = sk_timer_end(session_timer);
       double elapsed = elapsed_ms / 1000.0;
       double minutes = elapsed / 60.0;
       double accuracy = total_typed > 0 ? total_correct / total_typed : 0.0;

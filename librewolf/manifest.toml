@@ -3,5 +3,7 @@ description = ""
 
 [provides]
 
+
 [depends]
-control_center
+
+"control_center"

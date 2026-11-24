@@ -24,6 +24,7 @@ typedef struct {
 
 typedef struct {
   long long id;
+  long long due;
   long long due_ts;
   long long ivl;
   long long factor;
@@ -176,8 +177,11 @@ static void load_crt(sqlite3 *db) {
 static long long due_to_ts(long long now, int queue, long long due) {
   if (queue == 1 || queue == 3)
     return due;
-  if (queue == 2)
-    return g_crt > 0 ? g_crt + due * 86400 : now;
+  if (queue == 2) {
+    if (g_crt > 0 && due >= 0 && due < g_crt)
+      return g_crt + due * 86400;
+    return due;
+  }
   return now;
 }
 
@@ -315,6 +319,10 @@ static int card_cmp(const void *a, const void *b) {
     return -1;
   if (ca->due_ts > cb->due_ts)
     return 1;
+  if (ca->due < cb->due)
+    return -1;
+  if (ca->due > cb->due)
+    return 1;
   if (ca->id < cb->id)
     return -1;
   if (ca->id > cb->id)
@@ -388,6 +396,7 @@ static void load_cards(const char *deck_name) {
       AnkiCard *c = &g_cards[g_card_count++];
       memset(c, 0, sizeof(*c));
       c->id = (long long)q_col_i64(st, 0);
+      c->due = due;
       c->due_ts = ts;
       c->ivl = (long long)q_col_i64(st, 4);
       c->factor = (long long)q_col_i64(st, 5);
@@ -882,6 +891,7 @@ static void grade_card(int grade, double elapsed_ms) {
   c->factor = factor;
   c->reps = reps;
   c->lapses = lapses;
+  c->due = due_value;
   c->due_ts = due_to_ts(now, new_queue, due_value);
 }
 

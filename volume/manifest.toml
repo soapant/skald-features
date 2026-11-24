@@ -2,7 +2,9 @@ name = "volume"
 description = ""
 
 [provides]
-toggle.playpause
+
+"toggle.playpause"
 
 [depends]
-control_center
+
+"control_center"

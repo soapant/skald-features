@@ -14,7 +14,7 @@
 #define ANKI_LEARN_STEP_2 600
 #define ANKI_START_FACTOR 2500
 #define ANKI_MIN_FACTOR 1300
-#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.82f)
+#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.52f)
 
 typedef struct {
   long long id;
@@ -1195,7 +1195,7 @@ static void anki_render(PromptState *state) {
   }
   handle_grade_keys();
   if (g_view == ANKI_VIEW_DECKS) {
-    sk_place_editbox();
+    sk_place_editbox(.placeholder = "Decks");
     if (!sk_listbox_begin(.lb = state->lb, .item_height = FontSize * 2))
       return;
     SkListItemCtx ctx;
@@ -1343,8 +1343,8 @@ static void open_anki(void) {
 
   stats_check_day();
   g_session_timer = sk_timer_start();
-  sk_window(.title = "Anki", .placeholder = "Decks", .refresh = anki_refresh,
-            .render = anki_render, .enter = anki_enter,
+  sk_window(.title = "Anki", .refresh = anki_refresh, .render = anki_render,
+            .enter = anki_enter,
             .on_close = anki_on_close);
 }
 

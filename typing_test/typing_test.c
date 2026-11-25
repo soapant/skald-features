@@ -1265,7 +1265,7 @@ static bool typing_test_enter(PromptState *state) {
   return false;
 }
 
-static int typing_test_measure_lines(SkCharPos *pos, int count, const char *txt,
+static int typing_test_measure_lines(SkPos *pos, int count, const char *txt,
                                      int y, int max_width, int line_height,
                                      int fs) {
   sk_measure_text_wrapped(.x = 0, .y = y, .max_width = max_width,
@@ -1367,13 +1367,13 @@ static void typing_test_render(PromptState *state) {
     }
   }
 
-  SkCharPos *positions = NULL;
+  SkPos *positions = NULL;
   if (text_len > 0) {
-    positions = (SkCharPos *)malloc(sizeof(SkCharPos) * (size_t)(text_len + 1));
+    positions = (SkPos *)malloc(sizeof(SkPos) * (size_t)(text_len + 1));
   }
 
   if (positions) {
-    memset(positions, 0, sizeof(SkCharPos) * (size_t)(text_len + 1));
+    memset(positions, 0, sizeof(SkPos) * (size_t)(text_len + 1));
     typing_test_measure_lines(positions, text_len, text, text_y, W - margin * 2,
                               line_height, body);
 

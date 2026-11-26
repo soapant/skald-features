@@ -281,22 +281,45 @@ static void *playback_loop(void *arg) {
 static ListOfFiles macro_load_files;
 static const char *macro_file_name_ptrs[MAX_VISIBLE_ITEMS + 1];
 
+#define MACRO_FILENAME_CAP 256
+#define MACRO_KEY_CAP 320
+
+static void macro_filename(const char *name, char *out, size_t cap) {
+  if (!name || !name[0])
+    name = "last.macro";
+  snprintf(out, cap, "%s", name);
+  size_t ln = strlen(out);
+  bool has_ext = (ln >= 4 && out[ln - 4] == '.' && out[ln - 3] == 't' &&
+                  out[ln - 2] == 'x' && out[ln - 1] == 't');
+  if (!has_ext && ln + 4 < cap)
+    strcat(out, ".txt");
+}
+
+static void macro_store_key(const char *filename, char *out, size_t cap) {
+  snprintf(out, cap, "%s", filename);
+  size_t len = strlen(out);
+  if (len >= 4 && strcmp(out + len - 4, ".txt") == 0)
+    out[len - 4] = '\0';
+}
+
+static bool macro_index_add(const char *filename) {
+  SkStringList index = ski_store_get_all("macro", "macros");
+  bool found = false;
+  for (size_t i = 0; i < index.count; i++) {
+    if (strcmp(index.items[i], filename) == 0) {
+      found = true;
+      break;
+    }
+  }
+  sk_free_string_list(&index);
+  return found || ski_store_append("macro", "macros", filename);
+}
+
 static bool macro_save(const char *name) {
   if (event_count == 0)
     return false;
-  if (!name || !name[0])
-    name = "last.macro";
-  char filename[256];
-  snprintf(filename, sizeof(filename), "%s", name);
-  size_t ln = strlen(filename);
-  bool has_ext =
-      (ln >= 4 && filename[ln - 4] == '.' && filename[ln - 3] == 't' &&
-       filename[ln - 2] == 'x' && filename[ln - 1] == 't');
-  if (!has_ext) {
-    size_t l = strlen(filename);
-    if (l + 4 < sizeof(filename))
-      strcat(filename, ".txt");
-  }
+  char filename[MACRO_FILENAME_CAP];
+  macro_filename(name, filename, sizeof(filename));
 
   size_t cap = (size_t)event_count * 128 + 256;
   char *buf = (char *)malloc(cap);
@@ -310,95 +333,88 @@ static bool macro_save(const char *name) {
         events[i].a, events[i].b, events[i].x, events[i].y, events[i].mods,
         events[i].down ? 1 : 0, events[i].repeat ? 1 : 0, events[i].t_us);
   }
-  bool ok = sk_write_string_to_file(filename, buf);
+  SkStringList lines = sk_string_split(buf, "\n");
+  bool ok = lines.count > 0;
+  if (ok) {
+    char key[MACRO_KEY_CAP];
+    macro_store_key(filename, key, sizeof(key));
+    ok = ski_store_replace_all("macro", key,
+                               (const char *const *)lines.items,
+                               (int)lines.count);
+    if (ok)
+      ok = macro_index_add(filename);
+  }
+  sk_free_string_list(&lines);
   free(buf);
   return ok;
 }
 
 static int macro_load(const char *name) {
-  if (!name || !name[0])
-    name = "last.macro";
-  char filename[256];
-  snprintf(filename, sizeof(filename), "%s", name);
-  size_t ln = strlen(filename);
-  bool has_ext2 =
-      (ln >= 4 && filename[ln - 4] == '.' && filename[ln - 3] == 't' &&
-       filename[ln - 2] == 'x' && filename[ln - 1] == 't');
-  if (!has_ext2) {
-    if (ln + 4 < sizeof(filename))
-      strcat(filename, ".txt");
-  }
-  char *path = sk_resolve_data_path(filename);
-  if (!path)
-    return 0;
-  size_t len = 0;
-  char *data = sk_read_file_to_string(path, &len);
-  free(path);
-  if (!data)
+  char filename[MACRO_FILENAME_CAP];
+  macro_filename(name, filename, sizeof(filename));
+  char key[MACRO_KEY_CAP];
+  macro_store_key(filename, key, sizeof(key));
+  SkStringList lines = ski_store_get_all("macro", key);
+  if (lines.count == 0)
     return 0;
   int count = 0;
-  char *cursor = data;
-  if (sscanf(cursor, "%d", &count) != 1 || count < 0 ||
+  if (sscanf(lines.items[0], "%d", &count) != 1 || count < 0 ||
       count > MACRO_MAX_EVENTS) {
-    free(data);
+    sk_free_string_list(&lines);
     return 0;
   }
-  while (*cursor && *cursor != '\n')
-    cursor++;
-  if (*cursor == '\n')
-    cursor++;
   event_count = 0;
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < count && i + 1 < (int)lines.count; i++) {
     MacroEvent m;
     memset(&m, 0, sizeof(m));
     int down = 0, repeat = 0;
     unsigned long long t = 0;
-    if (sscanf(cursor, "%d %d %d %d %d %d %d %d %llu", &m.type, &m.a, &m.b,
-               &m.x, &m.y, &m.mods, &down, &repeat, &t) != 9)
+    if (sscanf(lines.items[i + 1], "%d %d %d %d %d %d %d %d %llu", &m.type,
+               &m.a, &m.b, &m.x, &m.y, &m.mods, &down, &repeat, &t) != 9)
       break;
     m.down = down != 0;
     m.repeat = repeat != 0;
     m.t_us = t;
     record_push(&m);
-    while (*cursor && *cursor != '\n')
-      cursor++;
-    if (*cursor == '\n')
-      cursor++;
   }
-  free(data);
+  sk_free_string_list(&lines);
   return event_count;
 }
 
 static void macro_refresh_cache(void) {
-  macro_load_files.count = 0;
-  char *resolved = sk_resolve_data_path("last.macro");
-  if (resolved) {
-    char dir[1024];
-    snprintf(dir, sizeof(dir), "%s", resolved);
-    char *slash = strrchr(dir, '/');
-    char *back = strrchr(dir, '\\');
-    if (back && (!slash || back > slash))
-      slash = back;
-    if (slash)
-      *slash = '\0';
-    sk_dir_scan(.dir_path = dir, .out = &macro_load_files, .max_depth = 1);
-    free(resolved);
+  sk_free_files_list(&macro_load_files);
+  SkStringList index = ski_store_get_all("macro", "macros");
+  if (index.count > 0) {
+    macro_load_files.files = (FileItem *)calloc(index.count, sizeof(FileItem));
+    if (macro_load_files.files) {
+      macro_load_files.count = index.count;
+      macro_load_files.capacity = index.count;
+      for (size_t i = 0; i < index.count; i++) {
+        snprintf(macro_load_files.files[i].name,
+                 sizeof(macro_load_files.files[i].name), "%s", index.items[i]);
+        macro_load_files.files[i].path[0] = '\0';
+      }
+    }
   }
-}
-static void init_macros(void) {
-  macro_refresh_cache();
-  int n = (int)macro_load_files.count;
-  if (n > MAX_VISIBLE_ITEMS)
-    n = MAX_VISIBLE_ITEMS;
-  for (int i = 0; i < n; i++) {
+  sk_free_string_list(&index);
+
+  for (size_t i = 0; i <= (size_t)MAX_VISIBLE_ITEMS; i++)
+    macro_file_name_ptrs[i] = NULL;
+  size_t n = macro_load_files.count;
+  if (n > (size_t)MAX_VISIBLE_ITEMS)
+    n = (size_t)MAX_VISIBLE_ITEMS;
+  for (size_t i = 0; i < n; i++)
     macro_file_name_ptrs[i] = macro_load_files.files[i].name;
-  }
 }
 
+static void init_macros(void) { macro_refresh_cache(); }
+
 static void macro_refresh(PromptState *state) {
+  int count = (int)macro_load_files.count;
+  if (count > MAX_VISIBLE_ITEMS)
+    count = MAX_VISIBLE_ITEMS;
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
-                      .items = macro_file_name_ptrs,
-                      .count = macro_load_files.count);
+                      .items = macro_file_name_ptrs, .count = count);
 }
 
 static bool macro_load_enter(PromptState *state) {
@@ -409,11 +425,29 @@ static bool macro_load_enter(PromptState *state) {
 
 static bool macro_load_ctrlenter(PromptState *state) {
   if (state->lb->selected_text && state->lb->selected_text[0]) {
-    char *path = sk_resolve_data_path(state->lb->selected_text);
-    if (path) {
-      remove(path);
-      free(path);
+    char filename[MACRO_FILENAME_CAP];
+    macro_filename(state->lb->selected_text, filename, sizeof(filename));
+    char key[MACRO_KEY_CAP];
+    macro_store_key(filename, key, sizeof(key));
+    ski_store_clear("macro", key);
+
+    SkStringList index = ski_store_get_all("macro", "macros");
+    if (index.count > 0) {
+      const char **kept = (const char **)malloc(index.count * sizeof(*kept));
+      if (kept) {
+        size_t kept_count = 0;
+        for (size_t i = 0; i < index.count; i++)
+          if (strcmp(index.items[i], filename) != 0)
+            kept[kept_count++] = index.items[i];
+        if (kept_count == 0)
+          ski_store_clear("macro", "macros");
+        else
+          ski_store_replace_all("macro", "macros", kept, (int)kept_count);
+        free(kept);
+      }
     }
+    sk_free_string_list(&index);
+    macro_refresh_cache();
     macro_refresh(state);
   }
   return false;

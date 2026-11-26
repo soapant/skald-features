@@ -3,8 +3,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define TODO_FILE_PATH "todo.txt"
-
 typedef struct {
   char dummy[1];
 } TodoAliasEntry;
@@ -181,7 +179,7 @@ static void add_todo_to_file(const char *text) {
   if (!text || strlen(text) == 0)
     return;
 
-  SkStringList lines = sk_load_file_list(TODO_FILE_PATH);
+  SkStringList lines = sk_store_get_all();
   int count = lines.count;
 
   char input_copy[512];
@@ -230,7 +228,7 @@ static void add_todo_to_file(const char *text) {
   }
   lines.items = grown;
   lines.items[count] = new_entry;
-  sk_write_to_file(TODO_FILE_PATH, (const char **)lines.items, count + 1);
+  sk_store_replace_all((const char *const *)lines.items, count + 1);
   lines.items[count] = NULL;
   sk_free_string_list(&lines);
 }
@@ -238,7 +236,7 @@ static void add_todo_to_file(const char *text) {
 static void RemoveTodoItemFromFile(const char *item_to_remove) {
   if (!item_to_remove)
     return;
-  SkStringList lines = sk_load_file_list(TODO_FILE_PATH);
+  SkStringList lines = sk_store_get_all();
   int count = lines.count;
   if (count == 0) {
     sk_free_string_list(&lines);
@@ -269,14 +267,14 @@ static void RemoveTodoItemFromFile(const char *item_to_remove) {
     }
     lines.items[kept_count++] = lines.items[i];
   }
-  sk_write_to_file(TODO_FILE_PATH, (const char **)lines.items, kept_count);
+  sk_store_replace_all((const char *const *)lines.items, kept_count);
   for (int i = kept_count; i < count; i++)
     lines.items[i] = NULL;
   sk_free_string_list(&lines);
 }
 
 static void todo_refresh_callback(PromptState *state) {
-  SkStringList files = sk_load_file_list(TODO_FILE_PATH);
+  SkStringList files = sk_store_get_all();
 
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
                       .items = (const char **)files.items,
@@ -347,8 +345,17 @@ static void todo_edit_callback(PromptState *state) {
                                     .lb = state->lb, .out_index = &idx);
   if (!edited)
     return;
-  if (idx >= 0)
-    sk_replace_line_in_file(TODO_FILE_PATH, idx, edited);
+  if (idx >= 0) {
+    SkStringList lines = sk_store_get_all();
+    if ((size_t)idx < lines.count) {
+      free(lines.items[idx]);
+      lines.items[idx] = strdup(edited);
+      sk_store_replace_all((const char *const *)lines.items,
+                           (int)lines.count);
+    }
+    sk_free_string_list(&lines);
+  }
+  free(edited);
   todo_refresh_callback(state);
 }
 

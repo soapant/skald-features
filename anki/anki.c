@@ -49,6 +49,7 @@ static int g_today_again;
 static int g_today_day;
 static long long g_crt = 0;
 
+static void stats_save(void);
 static void stats_check_day(void);
 
 static AnkiDeck *g_decks;
@@ -493,6 +494,70 @@ static void cloze_append(const char *inner, size_t n, bool answer, char *out,
   }
 }
 
+static void anki_emit(const char *s, size_t n, char *out, size_t *o,
+                      size_t cap) {
+  while (n > 0 && *o + 1 < cap && *s) {
+    out[(*o)++] = *s++;
+    n--;
+  }
+}
+
+static bool anki_group(const char *src, size_t len, size_t i, size_t *start,
+                       size_t *end) {
+  if (i >= len || src[i] != '{')
+    return false;
+  size_t j = i + 1;
+  while (j < len && src[j] != '}')
+    j++;
+  if (j >= len)
+    return false;
+  *start = i + 1;
+  *end = j;
+  return true;
+}
+
+static bool anki_latex_symbol(const char *cmd, size_t len, const char **out) {
+  static const struct {
+    const char *cmd;
+    const char *val;
+  } syms[] = {
+      {"alpha", "α"},       {"beta", "β"},        {"gamma", "γ"},
+      {"delta", "δ"},       {"epsilon", "ε"},     {"zeta", "ζ"},
+      {"eta", "η"},         {"theta", "θ"},       {"iota", "ι"},
+      {"kappa", "κ"},       {"lambda", "λ"},      {"mu", "μ"},
+      {"nu", "ν"},          {"xi", "ξ"},          {"pi", "π"},
+      {"rho", "ρ"},         {"sigma", "σ"},       {"tau", "τ"},
+      {"upsilon", "υ"},     {"phi", "φ"},         {"chi", "χ"},
+      {"psi", "ψ"},         {"omega", "ω"},       {"Gamma", "Γ"},
+      {"Delta", "Δ"},       {"Theta", "Θ"},       {"Lambda", "Λ"},
+      {"Xi", "Ξ"},          {"Pi", "Π"},          {"Sigma", "Σ"},
+      {"Phi", "Φ"},         {"Psi", "Ψ"},         {"Omega", "Ω"},
+      {"infty", "∞"},       {"times", "×"},       {"cdot", "·"},
+      {"pm", "±"},          {"mp", "∓"},          {"leq", "≤"},
+      {"geq", "≥"},         {"neq", "≠"},         {"approx", "≈"},
+      {"equiv", "≡"},       {"sim", "∼"},         {"propto", "∝"},
+      {"sum", "Σ"},         {"prod", "Π"},        {"int", "∫"},
+      {"oint", "∮"},        {"partial", "∂"},     {"nabla", "∇"},
+      {"sqrt", "√"},        {"rightarrow", "→"},  {"leftarrow", "←"},
+      {"leftrightarrow", "↔"}, {"Rightarrow", "⇒"}, {"Leftarrow", "⇐"},
+      {"to", "→"},          {"hbar", "ℏ"},        {"ell", "ℓ"},
+      {"Re", "ℜ"},          {"Im", "ℑ"},          {"forall", "∀"},
+      {"exists", "∃"},      {"in", "∈"},          {"notin", "∉"},
+      {"subset", "⊂"},      {"supset", "⊃"},      {"cup", "∪"},
+      {"cap", "∩"},         {"emptyset", "∅"},    {"angle", "∠"},
+      {"perp", "⊥"},        {"parallel", "∥"},    {"deg", "°"},
+      {"pow", "^"},         {"hat", "^"},         {"vec", "^"},
+      {"overline", "^"},    {"quad", " "},        {"qquad", "  "},
+  };
+  for (size_t i = 0; i < sizeof(syms) / sizeof(syms[0]); i++) {
+    if (strlen(syms[i].cmd) == len && strncmp(cmd, syms[i].cmd, len) == 0) {
+      *out = syms[i].val;
+      return true;
+    }
+  }
+  return false;
+}
+
 static void clean_copy(const char *src, char *out, size_t cap, size_t *o,
                        int cloze_mode) {
   size_t len = strlen(src);
@@ -540,6 +605,107 @@ static void clean_copy(const char *src, char *out, size_t cap, size_t *o,
       }
       if (matched)
         continue;
+    }
+    if (src[i] == '$') {
+      i++;
+      continue;
+    }
+    if ((src[i] == '^' || src[i] == '_') && i + 1 < len &&
+        src[i + 1] == '{') {
+      size_t start = 0, end = 0;
+      if (anki_group(src, len, i + 1, &start, &end)) {
+        if (*o + 1 < cap)
+          out[(*o)++] = src[i];
+        anki_emit(src + start, end - start, out, o, cap);
+        i = end + 1;
+        continue;
+      }
+    }
+    if (src[i] == '\\' && i + 1 < len) {
+      char c = src[i + 1];
+      if (c == '(' || c == ')' || c == '[' || c == ']') {
+        i += 2;
+        continue;
+      }
+      if (c == '\\') {
+        if (*o + 1 < cap)
+          out[(*o)++] = '\n';
+        i += 2;
+        continue;
+      }
+      if (c == ',' || c == ';' || c == '!' || c == ' ') {
+        if (*o + 1 < cap)
+          out[(*o)++] = ' ';
+        i += 2;
+        continue;
+      }
+      if (isalpha((unsigned char)c)) {
+        size_t j = i + 1;
+        while (j < len && isalpha((unsigned char)src[j]))
+          j++;
+        size_t clen = j - i - 1;
+        const char *name = src + i + 1;
+        size_t start = 0, end = 0;
+        if ((clen == 5 && strncmp(name, "begin", 5) == 0) ||
+            (clen == 3 && strncmp(name, "end", 3) == 0)) {
+          while (j < len && src[j] != '}')
+            j++;
+          i = j < len ? j + 1 : len;
+          continue;
+        }
+        if ((clen == 4 && strncmp(name, "frac", 4) == 0) ||
+            (clen == 5 && (strncmp(name, "dfrac", 5) == 0 ||
+                           strncmp(name, "tfrac", 5) == 0 ||
+                           strncmp(name, "cfrac", 5) == 0))) {
+          if (anki_group(src, len, j, &start, &end)) {
+            size_t start2 = 0, end2 = 0;
+            size_t next = end + 1;
+            if (anki_group(src, len, next, &start2, &end2)) {
+              anki_emit(src + start, end - start, out, o, cap);
+              if (*o + 1 < cap)
+                out[(*o)++] = '/';
+              anki_emit(src + start2, end2 - start2, out, o, cap);
+              i = end2 + 1;
+              continue;
+            }
+          }
+        }
+        if (clen == 4 && strncmp(name, "sqrt", 4) == 0) {
+          if (anki_group(src, len, j, &start, &end)) {
+            anki_emit("√", 4, out, o, cap);
+            anki_emit(src + start, end - start, out, o, cap);
+            i = end + 1;
+            continue;
+          }
+        }
+        if (clen == 4 && strncmp(name, "text", 4) == 0 ||
+            clen == 6 && (strncmp(name, "mathbf", 6) == 0 ||
+                          strncmp(name, "mathit", 6) == 0 ||
+                          strncmp(name, "mathrm", 6) == 0) ||
+            clen == 7 && strncmp(name, "mathcal", 7) == 0 ||
+            clen == 12 && strncmp(name, "operatorname", 12) == 0 ||
+            clen == 10 && strncmp(name, "textnormal", 10) == 0) {
+          if (anki_group(src, len, j, &start, &end)) {
+            anki_emit(src + start, end - start, out, o, cap);
+            i = end + 1;
+            continue;
+          }
+        }
+        if (clen == 4 && strncmp(name, "left", 4) == 0 ||
+            clen == 5 && strncmp(name, "right", 5) == 0) {
+          i = j;
+          continue;
+        }
+        const char *val = NULL;
+        if (anki_latex_symbol(name, clen, &val)) {
+          anki_emit(val, strlen(val), out, o, cap);
+          i = j;
+          continue;
+        }
+        anki_emit(name, clen, out, o, cap);
+        i = j;
+        continue;
+      }
     }
     out[(*o)++] = src[i++];
   }
@@ -762,13 +928,14 @@ static void grade_card(int grade, double elapsed_ms) {
   int new_queue;
 
   if (rtype != 1) {
+    int learning_queue = queue == 0 ? 1 : queue;
     if (grade == 1) {
-      new_queue = rtype;
+      new_queue = learning_queue;
       new_ivl = -ANKI_LEARN_STEP_1;
       due_value = now + ANKI_LEARN_STEP_1;
     } else if (grade == 2) {
       long long step = ANKI_LEARN_STEP_2;
-      new_queue = rtype;
+      new_queue = learning_queue;
       new_ivl = -step;
       due_value = now + step;
     } else {
@@ -968,6 +1135,7 @@ static void handle_grade_keys(void) {
   g_today_reviewed++;
   if (grade == 1)
     g_today_again++;
+  stats_save();
   double elapsed = sk_timer_end(g_answer_timer);
   grade_card(grade, elapsed);
   g_card_pos++;
@@ -1068,6 +1236,30 @@ static int stats_day_key(void) {
          local->tm_mday;
 }
 
+static void stats_save(void) {
+  char day[32], ms[64], reviewed[32], again[32];
+  snprintf(day, sizeof(day), "%d", g_today_day);
+  snprintf(ms, sizeof(ms), "%.0f", g_today_ms);
+  snprintf(reviewed, sizeof(reviewed), "%d", g_today_reviewed);
+  snprintf(again, sizeof(again), "%d", g_today_again);
+  const char *lines[4] = {day, ms, reviewed, again};
+  sk_store_replace_all(lines, 4);
+}
+
+static void stats_load(void) {
+  SkStringList lines = sk_store_get_all();
+  if (lines.count >= 4) {
+    double ms = 0;
+    sscanf(lines.items[0], "%d", &g_today_day);
+    sscanf(lines.items[1], "%lf", &ms);
+    sscanf(lines.items[2], "%d", &g_today_reviewed);
+    sscanf(lines.items[3], "%d", &g_today_again);
+    g_today_ms = ms;
+  }
+  sk_free_string_list(&lines);
+  stats_check_day();
+}
+
 static void stats_check_day(void) {
   int day = stats_day_key();
   if (g_today_day == day)
@@ -1076,6 +1268,7 @@ static void stats_check_day(void) {
   g_today_ms = 0;
   g_today_reviewed = 0;
   g_today_again = 0;
+  stats_save();
 }
 
 static void stats_format_duration(double ms, char *out, size_t n) {
@@ -1328,6 +1521,7 @@ static void anki_on_close(void) {
   double ms = sk_timer_end(g_session_timer);
   if (ms > 0)
     g_today_ms += ms;
+  stats_save();
   g_view = ANKI_VIEW_DECKS;
   g_focus_mode = false;
   free_cards();
@@ -1349,6 +1543,7 @@ static void open_anki(void) {
 }
 
 SKALD_FEATURE_SHUTDOWN {
+  stats_save();
   free_cards();
   free_decks();
   if (g_sqlite_lib) {
@@ -1358,6 +1553,7 @@ SKALD_FEATURE_SHUTDOWN {
 }
 
 SKALD_FEATURE_INIT {
+  stats_load();
   sk_register_hotkey(.hotkey="Alt+N",.cb=open_anki);
   sk_add_feature(.display_name = "Anki", .on_action = open_anki,
                  .icon = "/anki.png");

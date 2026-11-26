@@ -39,9 +39,8 @@ static char *get_zoxide_match(const char *query) {
   return out;
 }
 
-const char *TerminalZoxideFilePath = "TerminalZoxide.txt";
 static void zoxide_refresh(PromptState *state) {
-  SkStringList files = sk_load_file_list(TerminalZoxideFilePath);
+  SkStringList files = sk_store_get_all();
   sk_populate_listbox(.lb = state->lb, .filter = state->eb->filter,
                       .items = (const char **)files.items,
                       .count = (int)files.count);
@@ -53,8 +52,16 @@ static void zoxide_edit(PromptState *state) {
                                     .lb = state->lb, .out_index = &idx);
   if (!edited)
     return;
-  if (idx >= 0)
-    sk_replace_line_in_file(TerminalZoxideFilePath, idx, edited);
+  if (idx >= 0) {
+    SkStringList lines = sk_store_get_all();
+    if ((size_t)idx < lines.count) {
+      free(lines.items[idx]);
+      lines.items[idx] = strdup(edited);
+      sk_store_replace_all((const char *const *)lines.items,
+                           (int)lines.count);
+    }
+    sk_free_string_list(&lines);
+  }
   free(edited);
   zoxide_refresh(state);
 }
@@ -62,7 +69,17 @@ static bool zoxide_enter(PromptState *state) {
   const char *text =
       state->lb->selected_text ? state->lb->selected_text : state->eb->filter;
   if (!sk_is_selected(state->lb)) {
-    sk_append_unique_line(TerminalZoxideFilePath, text);
+    SkStringList lines = sk_store_get_all();
+    bool found = false;
+    for (size_t i = 0; i < lines.count; i++) {
+      if (lines.items[i] && strcmp(lines.items[i], text) == 0) {
+        found = true;
+        break;
+      }
+    }
+    sk_free_string_list(&lines);
+    if (!found)
+      sk_store_append(text);
   }
   char *path = get_zoxide_match(text);
   sk_launch_terminal_at_path(path, NULL);
@@ -70,7 +87,7 @@ static bool zoxide_enter(PromptState *state) {
   return true;
 }
 static void trigger_zoxide(void) {
-  SkStringList files = sk_load_file_list(TerminalZoxideFilePath);
+  SkStringList files = sk_store_get_all();
   sk_window(.title = "Zoxide", .items = (const char **)files.items,
             .refresh = zoxide_refresh, .enter = zoxide_enter,
             .edit = zoxide_edit);

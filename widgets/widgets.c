@@ -267,7 +267,6 @@ static SkWidget *internet = NULL;
 #define NET_ROW_H 26
 #define NET_PAD 16
 #define NET_SAVE_EVERY_SEC 5
-#define NET_STATE_FILE "net_usage.txt"
 
 typedef struct {
   unsigned long long today_bytes;
@@ -314,35 +313,27 @@ static void net_usage_load(void) {
   net.today_day = tm_now.tm_mday;
   net.month_index = tm_now.tm_mon;
 
-  char *body = sk_load_file(NET_STATE_FILE);
-  if (!body)
-    return;
-
-  char *cursor = body;
-  while (cursor && *cursor) {
-    char *nl = strchr(cursor, '\n');
-    if (nl)
-      *nl = '\0';
+  SkStringList lines = sk_store_get_all();
+  for (size_t i = 0; i < lines.count; i++) {
     unsigned long long today = 0, month = 0;
     int day = 0, month_index = 0;
-    if (sscanf(cursor, "%d %d %llu %llu", &day, &month_index, &today, &month) ==
-        4) {
+    if (sscanf(lines.items[i], "%d %d %llu %llu", &day, &month_index, &today,
+               &month) == 4) {
       if (month_index == net.month_index) {
         net.month_bytes = month;
         if (day == net.today_day)
           net.today_bytes = today;
       }
     }
-    cursor = nl ? nl + 1 : NULL;
   }
-  free(body);
+  sk_free_string_list(&lines);
 }
 
 static void net_usage_save(void) {
   char line[128];
   snprintf(line, sizeof(line), "%d %d %llu %llu", net.today_day,
            net.month_index, net.today_bytes, net.month_bytes);
-  sk_write_string_to_file(NET_STATE_FILE, line);
+  sk_store_set(line);
 }
 
 static void net_usage_sample(void) {

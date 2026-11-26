@@ -14,7 +14,7 @@
 #define ANKI_LEARN_STEP_2 600
 #define ANKI_START_FACTOR 2500
 #define ANKI_MIN_FACTOR 1300
-#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_BLACK, 0.52f)
+#define ANKI_SUB_COLOR sk_color_lerp(COLOR_BG, SK_WHITE, 0.62f)
 
 typedef struct {
   long long id;

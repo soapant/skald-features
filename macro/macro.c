@@ -251,7 +251,7 @@ static void *playback_loop(void *arg) {
           continue;
         if (m->down && is_macro_control_chord(m->a, m->mods))
           continue;
-        if (m->down && sk_replay_hotkey((SkKey){.vk_code = m->a, .mods = m->mods}))
+        if (m->down && sk_replay_hotkey((SkKey){.vk = m->a, .mods = m->mods}))
           continue;
         sk_emit_key(m->a, m->down);
         if (m->down)

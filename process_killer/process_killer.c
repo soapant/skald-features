@@ -12,7 +12,6 @@
 #define PK_NAME_LEN 64
 #define PK_ROW_LEN 160
 #define PK_SORT_MODES 3
-
 typedef struct {
   char name[PK_NAME_LEN];
   unsigned long long rss_kb;

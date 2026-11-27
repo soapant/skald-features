@@ -42,6 +42,9 @@ typedef enum { ANKI_SIDE_QUESTION, ANKI_SIDE_ANSWER } AnkiSide;
 static AnkiView g_view = ANKI_VIEW_DECKS;
 static AnkiSide g_side = ANKI_SIDE_QUESTION;
 static bool g_focus_mode;
+static bool g_big_mode;
+static bool g_open_settings_applied;
+static SkRect g_normal_bounds;
 static SkTimer g_session_timer;
 static double g_today_ms;
 static int g_today_reviewed;
@@ -51,6 +54,17 @@ static long long g_crt = 0;
 
 static void stats_save(void);
 static void stats_check_day(void);
+static void anki_toggle_big_mode(void);
+
+static void anki_apply_open_settings(void) {
+  if (g_open_settings_applied)
+    return;
+  g_open_settings_applied = true;
+  if (sk_config_get_setting_bool("anki.open_fullscreened"))
+    anki_toggle_big_mode();
+  if (sk_config_get_setting_bool("anki.open_hidden"))
+    g_focus_mode = true;
+}
 
 static AnkiDeck *g_decks;
 static const char **g_deck_items;
@@ -1215,6 +1229,7 @@ static void predict_interval(const AnkiCard *c, int grade, char *out,
 }
 
 static void anki_refresh(PromptState *state) {
+  anki_apply_open_settings();
   if (!state || !state->lb)
     return;
   if (g_view != ANKI_VIEW_DECKS) {
@@ -1287,12 +1302,13 @@ static void stats_format_duration(double ms, char *out, size_t n) {
 static void anki_info_render(PromptState *state) {
   (void)state;
   stats_check_day();
-  int fs = FontSize + 6;
+  int fs = FontSize + 6 + (g_big_mode ? 10 : 0);
   int lh = fs + 14;
-  int y = 80;
-  int x = 20;
-  sk_draw_rect(.x=x - 5,.y=y - 5,.w=420,.h=270,.filled=true,.color=sk_color_lerp(COLOR_BG,SK_BLACK,0.6f),.radius=6);
-  sk_draw_text(.text = "Today:", .x = x, .y = y, .font_size = FontSize + 12,
+  int y = 80 + (g_big_mode ? 40 : 0);
+  int x = 20 + (g_big_mode ? 20 : 0);
+  int panel_w = 480 + (g_big_mode ? 260 : 0);
+  sk_draw_rect(.x=x - 5,.y=y - 5,.w=panel_w,.h=270 + (g_big_mode ? 180 : 0),.filled=true,.color=sk_color_lerp(COLOR_BG,SK_BLACK,0.6f),.radius=6);
+  sk_draw_text(.text = "Today:", .x = x, .y = y, .font_size = FontSize + 12 + (g_big_mode ? 12 : 0),
                .color = sk_color_lerp(COLOR_BG,SK_BLUE,0.5f), .align = "LEFT");
   y += lh + 10;
 
@@ -1325,7 +1341,7 @@ static void anki_info_render(PromptState *state) {
   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
     sk_draw_text(.text = rows[i].label, .x = x, .y = y, .font_size = fs,
                  .color = sk_color_lerp(COLOR_BG,SK_WHITE,0.6f), .align = "LEFT");
-    sk_draw_text(.text = rows[i].value, .x = 340, .y = y, .font_size = fs, .align = "LEFT");
+    sk_draw_text(.text = rows[i].value, .x = x + 320 + (g_big_mode ? 220 : 0), .y = y, .font_size = fs, .align = "LEFT");
     y += lh;
   }
 }
@@ -1341,14 +1357,45 @@ static void anki_go_to_decks(PromptState *state) {
   sk_request_refresh();
 }
 
+static void anki_toggle_big_mode(void) {
+  if (!g_big_mode) {
+    SkRect bounds = sk_get_window_bounds();
+    if (bounds.w > 0 && bounds.h > 0)
+      g_normal_bounds = bounds;
+    SkRect m = sk_get_monitor_geometry();
+    if (m.w > 0 && m.h > 0) {
+      SkRect full = {.x = m.x, .y = m.y, .w = m.w, .h = m.h};
+      ski_resize_window_animated(&full, 120);
+    }
+    g_big_mode = true;
+  } else {
+    if (g_normal_bounds.w > 0 && g_normal_bounds.h > 0)
+      ski_resize_window_animated(&g_normal_bounds, 120);
+    g_big_mode = false;
+  }
+  sk_request_refresh();
+}
+
 static void anki_render(PromptState *state) {
   if (!state)
     return;
-  if (g_view == ANKI_VIEW_CARD && sk_is_key_pressed(SK_KEY_F))
-    g_focus_mode = !g_focus_mode;
+  int top_btn_w = 100 + (g_big_mode ? 60 : 0);
+  int top_btn_h = 40 + (g_big_mode ? 24 : 0);
+  int top_btn_x = 24 + (g_big_mode ? 24 : 0);
+  int top_btn_y = 24 + (g_big_mode ? 24 : 0);
+  int btn_font = FontSize + (g_big_mode ? 8 : 0);
+
+  if (sk_is_key_pressed(SK_KEY_F)) {
+    if (sk_shift_pressed()) {
+      anki_toggle_big_mode();
+      return;
+    }
+    if (g_view == ANKI_VIEW_CARD)
+      g_focus_mode = !g_focus_mode;
+  }
   if (g_view == ANKI_VIEW_INFO) {
     bool decks_clicked = sk_button_clicked("decks");
-    sk_place_button(.name="decks",.text="Decks",.x=24,.y=24,.w=100,.h=40);
+    sk_place_button(.name="decks",.text="Decks",.x=top_btn_x,.y=top_btn_y,.w=top_btn_w,.h=top_btn_h,.font_size=btn_font);
     anki_info_render(state);
     if (decks_clicked || sk_is_key_pressed(SK_KEY_D)) {
       anki_go_to_decks(state);
@@ -1371,8 +1418,8 @@ static void anki_render(PromptState *state) {
     bool decks_clicked = sk_button_clicked("decks");
     bool info_clicked = sk_button_clicked("info");
     if (!g_focus_mode) {
-      sk_place_button(.name="decks",.text="Decks",.x=24,.y=24,.w=100,.h=40);
-      sk_place_button(.name="info",.text="Info",.x=132,.y=24,.w=100,.h=40);
+      sk_place_button(.name="decks",.text="Decks",.x=top_btn_x,.y=top_btn_y,.w=top_btn_w,.h=top_btn_h,.font_size=btn_font);
+      sk_place_button(.name="info",.text="Info",.x=top_btn_x + top_btn_w + 8,.y=top_btn_y,.w=top_btn_w,.h=top_btn_h,.font_size=btn_font);
     }
     if (decks_clicked) {
       anki_go_to_decks(state);
@@ -1389,18 +1436,18 @@ static void anki_render(PromptState *state) {
   handle_grade_keys();
   if (g_view == ANKI_VIEW_DECKS) {
     sk_place_editbox(.placeholder = "Decks");
-    if (!sk_listbox_begin(.lb = state->lb, .item_height = FontSize * 2))
+    if (!sk_listbox_begin(.lb = state->lb, .item_height = FontSize * (g_big_mode ? 3 : 2)))
       return;
     SkListItemCtx ctx;
     while (sk_listbox_next(&ctx)) {
-      sk_draw_text(.text = ctx.text, .x = ctx.x + 12, .y = ctx.y + 4,
-                   .font_size = FontSize, .align = "LEFT");
+      sk_draw_text(.text = ctx.text, .x = ctx.x + 12 + (g_big_mode ? 12 : 0), .y = ctx.y + 4 + (g_big_mode ? 6 : 0),
+                   .font_size = FontSize + (g_big_mode ? 8 : 0), .align = "LEFT");
       const AnkiDeck *d = find_deck(ctx.text);
       if (d) {
         char count[64];
         snprintf(count, sizeof(count), "%d due", d->due);
         sk_draw_text(.text = count, .x = state->width - 16, .y = ctx.y,
-                     .font_size = 23, .align = "RIGHT", .color = ANKI_SUB_COLOR);
+                     .font_size = 23 + (g_big_mode ? 10 : 0), .align = "RIGHT", .color = ANKI_SUB_COLOR);
       }
     }
     sk_listbox_end();
@@ -1410,13 +1457,14 @@ static void anki_render(PromptState *state) {
   bool is_question = g_side == ANKI_SIDE_QUESTION;
   bool cloze_answer = !is_question && g_card_pos < g_card_count &&
                       g_cards[g_card_pos].cloze;
-  int max_w = state->width - 48;
-  int top_margin = 16;
-  int bottom_margin = g_focus_mode ? 16 : 130;
+  int side_margin = 24 + (g_big_mode ? 24 : 0);
+  int max_w = state->width - side_margin * 2;
+  int top_margin = 16 + (g_big_mode ? 32 : 0);
+  int bottom_margin = g_focus_mode ? 16 : (g_big_mode ? 190 : 130);
   int avail_h = state->height - top_margin - bottom_margin;
   if (avail_h < 40)
     avail_h = 40;
-  int main_fs = FontSize + 16 + (g_focus_mode ? 10 : 0);
+  int main_fs = FontSize + 16 + (g_focus_mode ? 10 : 0) + (g_big_mode ? 14 : 0);
   int text_h = measure_main_text(max_w, main_fs, main_fs, cloze_answer,
                                  is_question);
   while (text_h > avail_h && main_fs > 12) {
@@ -1429,27 +1477,32 @@ static void anki_render(PromptState *state) {
     body_y += (avail_h - text_h) / 2;
   if (cloze_answer) {
     sk_draw_text_wrapped(.segments = g_cloze_segs, .count = g_cloze_seg_count,
-                         .x = 24, .y = body_y, .max_width = max_w,
+                         .x = side_margin, .y = body_y, .max_width = max_w,
                          .line_height = main_fs, .font_size = main_fs,
                          .color = COLOR_TEXT, .align = "LEFT");
   } else {
-    int next_y = sk_draw_text_wrapped(.text = g_qtext, .x = 24, .y = body_y,
+    int next_y = sk_draw_text_wrapped(.text = g_qtext, .x = side_margin, .y = body_y,
                                       .max_width = max_w,
                                       .line_height = main_fs,
                                       .font_size = main_fs,
                                       .color = ANKI_SUB_COLOR, .align = "LEFT");
     if (!is_question && g_abody[0])
-      sk_draw_text_wrapped(.text = g_abody, .x = 24, .y = next_y + main_fs,
+      sk_draw_text_wrapped(.text = g_abody, .x = side_margin, .y = next_y + main_fs,
                            .max_width = max_w, .line_height = main_fs,
                            .font_size = main_fs, .color = COLOR_TEXT,
                            .align = "LEFT");
   }
   if (!g_focus_mode) {
     if (g_side == ANKI_SIDE_ANSWER) {
-      sk_place_button(.name="again",.text="Again",.x=154,.h=50,.y=state->height-76);
-      sk_place_button(.name="hard",.text="Hard",.x=304,.h=50,.y=state->height-76);
-      sk_place_button(.name="good",.text="Good",.x=454,.h=50,.y=state->height-76);
-      sk_place_button(.name="easy",.text="Easy",.x=604,.h=50,.y=state->height-76);
+      int bw = g_big_mode ? 220 : 100;
+      int bh = g_big_mode ? 80 : 50;
+      int gap = g_big_mode ? 40 : 50;
+      int bx = g_big_mode ? (state->width - (4 * bw + 3 * gap)) / 2 : 154;
+      int by = state->height - (g_big_mode ? bh + 40 : 76);
+      const char *names[4] = {"again", "hard", "good", "easy"};
+      char *labels[4] = {"Again", "Hard", "Good", "Easy"};
+      for (int i = 0; i < 4; i++)
+        sk_place_button(.name=names[i],.text=labels[i],.x=bx + i * (bw + gap),.h=bh,.y=by,.w=bw,.font_size=btn_font);
 
       char iv_again[16] = "", iv_hard[16] = "", iv_good[16] = "",
            iv_easy[16] = "";
@@ -1460,10 +1513,12 @@ static void anki_render(PromptState *state) {
         predict_interval(card, 3, iv_good, sizeof(iv_good));
         predict_interval(card, 4, iv_easy, sizeof(iv_easy));
       }
-      sk_draw_text(.text = iv_again, .x = 184, .y = state->height - 110);
-      sk_draw_text(.text = iv_hard, .x = 344, .y = state->height - 110);
-      sk_draw_text(.text = iv_good, .x = 494, .y = state->height - 110);
-      sk_draw_text(.text = iv_easy, .x = 644, .y = state->height - 110);
+      const char *ivs[4] = {iv_again, iv_hard, iv_good, iv_easy};
+      int iv_font = FontSize + (g_big_mode ? 6 : 0);
+      int iv_y = by - (g_big_mode ? 44 : 34);
+      for (int i = 0; i < 4; i++)
+        sk_draw_text(.text = ivs[i], .x = bx + i * (bw + gap) + bw / 2, .y = iv_y,
+                     .font_size = iv_font, .align = "CENTER", .color = ANKI_SUB_COLOR);
     } else {
       int new_count = 0, learning = 0, due = 0;
       count_remaining(&new_count, &learning, &due);
@@ -1475,10 +1530,14 @@ static void anki_render(PromptState *state) {
           {new_buf, SK_BLUE},      {" + ", ANKI_SUB_COLOR}, {learning_buf, SK_RED},
           {" + ", ANKI_SUB_COLOR}, {due_buf, SK_GREEN},
       };
-      sk_draw_text_segments(.segments = segments, .count = 5, .x = 435,
-                            .y = state->height - 108, .font_size = 20,
+      sk_draw_text_segments(.segments = segments, .count = 5,
+                            .x = g_big_mode ? state->width / 2 : 435,
+                            .y = state->height - (g_big_mode ? 170 : 108),
+                            .font_size = 20 + (g_big_mode ? 10 : 0),
                             .color = ANKI_SUB_COLOR, .align = "CENTER");
-      sk_place_button(.name="show",.text="Show Answer",.x=360,.h=50,.w=150,.y=state->height-76);
+      int show_w = g_big_mode ? 300 : 150;
+      int show_h = g_big_mode ? 80 : 50;
+      sk_place_button(.name="show",.text="Show Answer",.x=(state->width - show_w) / 2,.h=show_h,.w=show_w,.y=state->height-(g_big_mode ? show_h + 40 : 76),.font_size=btn_font);
     }
   }
 }
@@ -1524,12 +1583,16 @@ static void anki_on_close(void) {
   stats_save();
   g_view = ANKI_VIEW_DECKS;
   g_focus_mode = false;
+  g_big_mode = false;
+  g_open_settings_applied = false;
   free_cards();
   free_decks();
 }
 
 static void open_anki(void) {
   load_decks();
+  g_big_mode = false;
+  g_open_settings_applied = false;
   if (sk_process_running("anki")) {
     sk_message(.slot=TOP_CENTER,.message="Anki is currently running please close it and try again"); 
     return;
@@ -1553,6 +1616,18 @@ SKALD_FEATURE_SHUTDOWN {
 }
 
 SKALD_FEATURE_INIT {
+  SkSettingsEntry *anki =
+      sk_add_settings_entry(.name = "Anki", .icon = "/anki.png",
+                            .desc = "Configure Anki Settings");
+
+  sk_settings_entry_add_checkbox(anki, .key = "anki.open_fullscreened",
+                                 .title = "Open Fullscreened",
+                                 .sub = "Makes anki always open in fullscreen mode");
+
+  sk_settings_entry_add_checkbox(anki, .key = "anki.open_hidden",
+                                 .title = "Open Hidden",
+                                 .sub = "Makes anki always open in hidden mode with no buttons shown");
+
   stats_load();
   sk_register_hotkey(.hotkey="Alt+N",.cb=open_anki);
   sk_add_feature(.display_name = "Anki", .on_action = open_anki,

@@ -576,20 +576,15 @@ static void vim_move_left(void) {
   PromptState *ps = sk_get_active_prompt();
   if (!ps || !ps->eb)
     return;
-  if (ps->eb->cursor > 0 && sk_focus_kind() == SK_FOCUS_LISTBOX) {
+  if (ps->eb->cursor > 0) {
     ps->eb->cursor--;
-  } else {
-    sk_focus_move_dir(SK_FOCUS_LEFT);
   }
 }
 
 static void vim_move_right(void) {
   PromptState *ps = sk_get_active_prompt();
-  if (ps->eb->cursor < strlen(ps->eb->filter) &&
-      sk_focus_kind() == SK_FOCUS_LISTBOX) {
+  if (ps->eb->cursor < strlen(ps->eb->filter)) {
     ps->eb->cursor++;
-  } else {
-    sk_focus_move_dir(SK_FOCUS_RIGHT);
   }
 }
 static void vim_delete_line(void) {

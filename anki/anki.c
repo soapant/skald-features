@@ -123,27 +123,30 @@ static bool sqlite_init(void) {
   if (!g_sqlite_lib)
     return false;
   sk_library_register("sqlite", g_sqlite_lib);
-  q_open =
-      (int (*)(const char *, sqlite3 **, int, const char *))sk_library_symbol(
-          g_sqlite_lib, "sqlite3_open_v2");
+  q_open = (int (*)(const char *, sqlite3 **, int,
+                    const char *))sk_library_symbol(g_sqlite_lib,
+                                                    "sqlite3_open_v2");
   q_close =
       (int (*)(sqlite3 *))sk_library_symbol(g_sqlite_lib, "sqlite3_close");
-  q_exec =
-      (int (*)(sqlite3 *, const char *, int (*)(void *, int, char **, char **),
-               void *, char **))sk_library_symbol(g_sqlite_lib, "sqlite3_exec");
+  q_exec = (int (*)(sqlite3 *, const char *,
+                    int (*)(void *, int, char **, char **), void *,
+                    char **))sk_library_symbol(g_sqlite_lib, "sqlite3_exec");
   q_prepare = (int (*)(sqlite3 *, const char *, int, sqlite3_stmt **,
                        const char **))sk_library_symbol(g_sqlite_lib,
                                                         "sqlite3_prepare_v2");
-  q_step =
-      (int (*)(sqlite3_stmt *))sk_library_symbol(g_sqlite_lib, "sqlite3_step");
+  q_step = (int (*)(sqlite3_stmt *))sk_library_symbol(g_sqlite_lib,
+                                                      "sqlite3_step");
   q_finalize = (int (*)(sqlite3_stmt *))sk_library_symbol(g_sqlite_lib,
                                                           "sqlite3_finalize");
-  q_bind_i64 = (int (*)(sqlite3_stmt *, int, sqlite3_int64))sk_library_symbol(
-      g_sqlite_lib, "sqlite3_bind_int64");
-  q_col_text = (const unsigned char *(*)(sqlite3_stmt *, int))sk_library_symbol(
-      g_sqlite_lib, "sqlite3_column_text");
-  q_col_i64 = (sqlite3_int64 (*)(sqlite3_stmt *, int))sk_library_symbol(
-      g_sqlite_lib, "sqlite3_column_int64");
+  q_bind_i64 =
+      (int (*)(sqlite3_stmt *, int, sqlite3_int64))sk_library_symbol(
+          g_sqlite_lib, "sqlite3_bind_int64");
+  q_col_text =
+      (const unsigned char *(*)(sqlite3_stmt *, int))sk_library_symbol(
+          g_sqlite_lib, "sqlite3_column_text");
+  q_col_i64 =
+      (sqlite3_int64(*)(sqlite3_stmt *, int))sk_library_symbol(g_sqlite_lib,
+                                                               "sqlite3_column_int64");
   q_errmsg = (const char *(*)(sqlite3 *))sk_library_symbol(g_sqlite_lib,
                                                            "sqlite3_errmsg");
   return q_open && q_close && q_exec && q_prepare && q_step && q_finalize &&
@@ -296,9 +299,8 @@ static void load_decks(void) {
   }
 
   st = NULL;
-  if (q_prepare(db,
-                "SELECT did, due, queue, odid, odue FROM cards "
-                "WHERE queue >= 0;",
+  if (q_prepare(db, "SELECT did, due, queue, odid, odue FROM cards "
+                    "WHERE queue >= 0;",
                 -1, &st, NULL) == SQLITE_OK) {
     while (q_step(st) == SQLITE_ROW) {
       long long did = (long long)q_col_i64(st, 0);
@@ -387,11 +389,10 @@ static void load_cards(const char *deck_name) {
 
   long long now = (long long)time(NULL);
   st = NULL;
-  if (q_prepare(db,
-                "SELECT c.id, n.flds, c.due, c.queue, c.ivl, c.factor, "
-                "c.reps, c.lapses, c.odid, c.odue FROM notes n JOIN "
-                "cards c ON n.id = c.nid WHERE c.did = ? AND "
-                "c.queue >= 0;",
+  if (q_prepare(db, "SELECT c.id, n.flds, c.due, c.queue, c.ivl, c.factor, "
+                    "c.reps, c.lapses, c.odid, c.odue FROM notes n JOIN "
+                    "cards c ON n.id = c.nid WHERE c.did = ? AND "
+                    "c.queue >= 0;",
                 -1, &st, NULL) == SQLITE_OK) {
     q_bind_i64(st, 1, deck_id);
     while (q_step(st) == SQLITE_ROW) {
@@ -461,9 +462,9 @@ static bool tag_is_break(const char *t, size_t n) {
     k++;
   if (k >= n)
     return false;
-  static const char *const breaks[] = {"br", "p",  "div", "li", "tr",
-                                       "ul", "ol", "h1",  "h2", "h3",
-                                       "h4", "h5", "h6"};
+  static const char *const breaks[] = {"br", "p",  "div", "li", "tr", "ul",
+                                       "ol", "h1", "h2",  "h3", "h4", "h5",
+                                       "h6"};
   for (size_t i = 0; i < sizeof(breaks) / sizeof(breaks[0]); i++) {
     size_t len = strlen(breaks[i]);
     if (ci_starts(t + k, n - k, breaks[i]) &&
@@ -534,87 +535,33 @@ static bool anki_latex_symbol(const char *cmd, size_t len, const char **out) {
     const char *cmd;
     const char *val;
   } syms[] = {
-      {"alpha", "α"},
-      {"beta", "β"},
-      {"gamma", "γ"},
-      {"delta", "δ"},
-      {"epsilon", "ε"},
-      {"zeta", "ζ"},
-      {"eta", "η"},
-      {"theta", "θ"},
-      {"iota", "ι"},
-      {"kappa", "κ"},
-      {"lambda", "λ"},
-      {"mu", "μ"},
-      {"nu", "ν"},
-      {"xi", "ξ"},
-      {"pi", "π"},
-      {"rho", "ρ"},
-      {"sigma", "σ"},
-      {"tau", "τ"},
-      {"upsilon", "υ"},
-      {"phi", "φ"},
-      {"chi", "χ"},
-      {"psi", "ψ"},
-      {"omega", "ω"},
-      {"Gamma", "Γ"},
-      {"Delta", "Δ"},
-      {"Theta", "Θ"},
-      {"Lambda", "Λ"},
-      {"Xi", "Ξ"},
-      {"Pi", "Π"},
-      {"Sigma", "Σ"},
-      {"Phi", "Φ"},
-      {"Psi", "Ψ"},
-      {"Omega", "Ω"},
-      {"infty", "∞"},
-      {"times", "×"},
-      {"cdot", "·"},
-      {"pm", "±"},
-      {"mp", "∓"},
-      {"leq", "≤"},
-      {"geq", "≥"},
-      {"neq", "≠"},
-      {"approx", "≈"},
-      {"equiv", "≡"},
-      {"sim", "∼"},
-      {"propto", "∝"},
-      {"sum", "Σ"},
-      {"prod", "Π"},
-      {"int", "∫"},
-      {"oint", "∮"},
-      {"partial", "∂"},
-      {"nabla", "∇"},
-      {"sqrt", "√"},
-      {"rightarrow", "→"},
-      {"leftarrow", "←"},
-      {"leftrightarrow", "↔"},
-      {"Rightarrow", "⇒"},
-      {"Leftarrow", "⇐"},
-      {"to", "→"},
-      {"hbar", "ℏ"},
-      {"ell", "ℓ"},
-      {"Re", "ℜ"},
-      {"Im", "ℑ"},
-      {"forall", "∀"},
-      {"exists", "∃"},
-      {"in", "∈"},
-      {"notin", "∉"},
-      {"subset", "⊂"},
-      {"supset", "⊃"},
-      {"cup", "∪"},
-      {"cap", "∩"},
-      {"emptyset", "∅"},
-      {"angle", "∠"},
-      {"perp", "⊥"},
-      {"parallel", "∥"},
-      {"deg", "°"},
-      {"pow", "^"},
-      {"hat", "^"},
-      {"vec", "^"},
-      {"overline", "^"},
-      {"quad", " "},
-      {"qquad", "  "},
+      {"alpha", "α"},       {"beta", "β"},        {"gamma", "γ"},
+      {"delta", "δ"},       {"epsilon", "ε"},     {"zeta", "ζ"},
+      {"eta", "η"},         {"theta", "θ"},       {"iota", "ι"},
+      {"kappa", "κ"},       {"lambda", "λ"},      {"mu", "μ"},
+      {"nu", "ν"},          {"xi", "ξ"},          {"pi", "π"},
+      {"rho", "ρ"},         {"sigma", "σ"},       {"tau", "τ"},
+      {"upsilon", "υ"},     {"phi", "φ"},         {"chi", "χ"},
+      {"psi", "ψ"},         {"omega", "ω"},       {"Gamma", "Γ"},
+      {"Delta", "Δ"},       {"Theta", "Θ"},       {"Lambda", "Λ"},
+      {"Xi", "Ξ"},          {"Pi", "Π"},          {"Sigma", "Σ"},
+      {"Phi", "Φ"},         {"Psi", "Ψ"},         {"Omega", "Ω"},
+      {"infty", "∞"},       {"times", "×"},       {"cdot", "·"},
+      {"pm", "±"},          {"mp", "∓"},          {"leq", "≤"},
+      {"geq", "≥"},         {"neq", "≠"},         {"approx", "≈"},
+      {"equiv", "≡"},       {"sim", "∼"},         {"propto", "∝"},
+      {"sum", "Σ"},         {"prod", "Π"},        {"int", "∫"},
+      {"oint", "∮"},        {"partial", "∂"},     {"nabla", "∇"},
+      {"sqrt", "√"},        {"rightarrow", "→"},  {"leftarrow", "←"},
+      {"leftrightarrow", "↔"}, {"Rightarrow", "⇒"}, {"Leftarrow", "⇐"},
+      {"to", "→"},          {"hbar", "ℏ"},        {"ell", "ℓ"},
+      {"Re", "ℜ"},          {"Im", "ℑ"},          {"forall", "∀"},
+      {"exists", "∃"},      {"in", "∈"},          {"notin", "∉"},
+      {"subset", "⊂"},      {"supset", "⊃"},      {"cup", "∪"},
+      {"cap", "∩"},         {"emptyset", "∅"},    {"angle", "∠"},
+      {"perp", "⊥"},        {"parallel", "∥"},    {"deg", "°"},
+      {"pow", "^"},         {"hat", "^"},         {"vec", "^"},
+      {"overline", "^"},    {"quad", " "},        {"qquad", "  "},
   };
   for (size_t i = 0; i < sizeof(syms) / sizeof(syms[0]); i++) {
     if (strlen(syms[i].cmd) == len && strncmp(cmd, syms[i].cmd, len) == 0) {
@@ -639,7 +586,8 @@ static void clean_copy(const char *src, char *out, size_t cap, size_t *o,
         continue;
       }
     }
-    if (src[i] == '[' && i + 7 <= len && strncmp(src + i, "[sound:", 7) == 0) {
+    if (src[i] == '[' && i + 7 <= len &&
+        strncmp(src + i, "[sound:", 7) == 0) {
       const char *end = strchr(src + i, ']');
       i = end ? (size_t)(end - src) + 1 : len;
       continue;
@@ -676,7 +624,8 @@ static void clean_copy(const char *src, char *out, size_t cap, size_t *o,
       i++;
       continue;
     }
-    if ((src[i] == '^' || src[i] == '_') && i + 1 < len && src[i + 1] == '{') {
+    if ((src[i] == '^' || src[i] == '_') && i + 1 < len &&
+        src[i + 1] == '{') {
       size_t start = 0, end = 0;
       if (anki_group(src, len, i + 1, &start, &end)) {
         if (*o + 1 < cap)
@@ -917,21 +866,22 @@ static void build_cloze_segments(const AnkiCard *card) {
   }
 }
 
-static int measure_main_text(int max_w, int line_h, int fs, bool cloze_answer,
-                             bool is_question) {
+static int measure_main_text(int max_w, int line_h, int fs,
+                             bool cloze_answer, bool is_question) {
   if (cloze_answer)
     return sk_draw_text_wrapped(.segments = g_cloze_segs,
                                 .count = g_cloze_seg_count, .y = 0,
                                 .max_width = max_w, .line_height = line_h,
                                 .font_size = fs, .measure_only = true);
-  int height = sk_draw_text_wrapped(.text = g_qtext, .y = 0, .max_width = max_w,
-                                    .line_height = line_h, .font_size = fs,
-                                    .measure_only = true);
+  int height = sk_draw_text_wrapped(.text = g_qtext, .y = 0,
+                                    .max_width = max_w, .line_height = line_h,
+                                    .font_size = fs, .measure_only = true);
   if (!is_question && g_abody[0])
-    height +=
-        fs + sk_draw_text_wrapped(.text = g_abody, .y = 0, .max_width = max_w,
-                                  .line_height = line_h, .font_size = fs,
-                                  .measure_only = true);
+    height += fs + sk_draw_text_wrapped(.text = g_abody, .y = 0,
+                                        .max_width = max_w,
+                                        .line_height = line_h,
+                                        .font_size = fs,
+                                        .measure_only = true);
   return height;
 }
 
@@ -940,8 +890,7 @@ static void init_revlog_id(sqlite3 *db) {
     return;
   g_revlog_init = true;
   sqlite3_stmt *st = NULL;
-  if (q_prepare(db, "SELECT MAX(id) FROM revlog;", -1, &st, NULL) ==
-      SQLITE_OK) {
+  if (q_prepare(db, "SELECT MAX(id) FROM revlog;", -1, &st, NULL) == SQLITE_OK) {
     if (q_step(st) == SQLITE_ROW)
       g_last_revlog_ms = (long long)q_col_i64(st, 0);
     q_finalize(st);
@@ -969,9 +918,8 @@ static void grade_card(int grade, double elapsed_ms) {
   int lapses = c->lapses;
   int queue = c->queue;
   sqlite3_stmt *cur = NULL;
-  if (q_prepare(db,
-                "SELECT ivl, factor, reps, lapses, queue, odid FROM "
-                "cards WHERE id = ?;",
+  if (q_prepare(db, "SELECT ivl, factor, reps, lapses, queue, odid FROM "
+                    "cards WHERE id = ?;",
                 -1, &cur, NULL) == SQLITE_OK) {
     q_bind_i64(cur, 1, c->id);
     if (q_step(cur) == SQLITE_ROW) {
@@ -1082,10 +1030,9 @@ static void grade_card(int grade, double elapsed_ms) {
   if (ms > 86400000)
     ms = 86400000;
   st = NULL;
-  if (ok && q_prepare(db,
-                      "INSERT INTO revlog (id, cid, usn, ease, ivl, "
-                      "lastIvl, factor, time, type) VALUES "
-                      "(?,?,?,?,?,?,?,?,?);",
+  if (ok && q_prepare(db, "INSERT INTO revlog (id, cid, usn, ease, ivl, "
+                          "lastIvl, factor, time, type) VALUES "
+                          "(?,?,?,?,?,?,?,?,?);",
                       -1, &st, NULL) == SQLITE_OK) {
     q_bind_i64(st, 1, rid);
     q_bind_i64(st, 2, c->id);
@@ -1103,8 +1050,8 @@ static void grade_card(int grade, double elapsed_ms) {
     fprintf(stderr, "anki: revlog insert failed: %s\n", q_errmsg(db));
 
   st = NULL;
-  if (ok &&
-      q_prepare(db, "UPDATE col SET mod=?;", -1, &st, NULL) == SQLITE_OK) {
+  if (ok && q_prepare(db, "UPDATE col SET mod=?;", -1, &st, NULL) ==
+                SQLITE_OK) {
     q_bind_i64(st, 1, now);
     ok = q_step(st) == SQLITE_DONE;
     q_finalize(st);
@@ -1356,18 +1303,24 @@ static void anki_info_render(PromptState *state) {
   (void)state;
   stats_check_day();
   int fs = FontSize + 6 + (g_big_mode ? 10 : 0);
-  int lh = fs + (g_big_mode ? 28 : 14);
+  int lh = fs + 14;
   int y = 80 + (g_big_mode ? 40 : 0);
   int x = 20 + (g_big_mode ? 20 : 0);
+  int panel_w = 480 + (g_big_mode ? 260 : 0);
+  sk_draw_rect(.x=x - 5,.y=y - 5,.w=panel_w,.h=270 + (g_big_mode ? 180 : 0),.filled=true,.color=sk_color_lerp(COLOR_BG,SK_BLACK,0.6f),.radius=6);
+  sk_draw_text(.text = "Today:", .x = x, .y = y, .font_size = FontSize + 12 + (g_big_mode ? 12 : 0),
+               .color = sk_color_lerp(COLOR_BG,SK_BLUE,0.5f), .align = "LEFT");
+  y += lh + 10;
 
   char time_buf[64], reviewed_buf[32], again_buf[32], pct_buf[32],
       per_card_buf[64];
   stats_format_duration(g_today_ms, time_buf, sizeof(time_buf));
   snprintf(reviewed_buf, sizeof(reviewed_buf), "%d", g_today_reviewed);
   snprintf(again_buf, sizeof(again_buf), "%d", g_today_again);
-  int correct = g_today_reviewed > 0 ? (g_today_reviewed - g_today_again) *
-                                           100 / g_today_reviewed
-                                     : 0;
+  int correct = g_today_reviewed > 0
+                    ? (g_today_reviewed - g_today_again) * 100 /
+                          g_today_reviewed
+                    : 0;
   snprintf(pct_buf, sizeof(pct_buf), "%d%%", correct);
   if (g_today_reviewed > 0)
     stats_format_duration(g_today_ms / g_today_reviewed, per_card_buf,
@@ -1385,42 +1338,10 @@ static void anki_info_render(PromptState *state) {
       {"Correct:", pct_buf},
       {"Time Per Card:", per_card_buf},
   };
-
-  int title_fs = FontSize + 12 + (g_big_mode ? 12 : 0);
-  int value_x = x + 320 + (g_big_mode ? 220 : 0);
-  int panel_w = 480 + (g_big_mode ? 260 : 0);
-  if (g_big_mode) {
-    int label_w = sk_get_text_width("Today:", title_fs);
-    int value_w = 0;
-    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
-      int w = sk_get_text_width(rows[i].label, fs);
-      if (w > label_w)
-        label_w = w;
-      w = sk_get_text_width(rows[i].value, fs);
-      if (w > value_w)
-        value_w = w;
-    }
-    int want_x = x + label_w + 40;
-    if (want_x > value_x)
-      value_x = want_x;
-    int want_w = value_x - x + value_w + 40;
-    if (want_w > panel_w)
-      panel_w = want_w;
-  }
-  sk_draw_rect(.x = x - 5, .y = y - 5, .w = panel_w,
-               .h = 270 + (g_big_mode ? 180 : 0), .filled = true,
-               .color = sk_color_lerp(COLOR_BG, SK_BLACK, 0.6f), .radius = 6);
-  sk_draw_text(.text = "Today:", .x = x, .y = y, .font_size = title_fs,
-               .color = sk_color_lerp(COLOR_BG, SK_BLUE, 0.5f),
-               .align = "LEFT");
-  y += lh + 10;
-
   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
     sk_draw_text(.text = rows[i].label, .x = x, .y = y, .font_size = fs,
-                 .color = sk_color_lerp(COLOR_BG, SK_WHITE, 0.6f),
-                 .align = "LEFT");
-    sk_draw_text(.text = rows[i].value, .x = value_x, .y = y, .font_size = fs,
-                 .align = "LEFT");
+                 .color = sk_color_lerp(COLOR_BG,SK_WHITE,0.6f), .align = "LEFT");
+    sk_draw_text(.text = rows[i].value, .x = x + 320 + (g_big_mode ? 220 : 0), .y = y, .font_size = fs, .align = "LEFT");
     y += lh;
   }
 }
@@ -1463,7 +1384,6 @@ static void anki_render(PromptState *state) {
   int top_btn_x = 24 + (g_big_mode ? 24 : 0);
   int top_btn_y = 24 + (g_big_mode ? 24 : 0);
   int btn_font = FontSize + (g_big_mode ? 8 : 0);
-  handle_grade_keys();
 
   if (sk_is_key_pressed(SK_KEY_F)) {
     if (sk_shift_pressed()) {
@@ -1474,11 +1394,10 @@ static void anki_render(PromptState *state) {
       g_focus_mode = !g_focus_mode;
   }
   if (g_view == ANKI_VIEW_INFO) {
-    sk_place_button(.name = "decks", .text = "Decks", .x = top_btn_x,
-                    .y = top_btn_y, .w = top_btn_w, .h = top_btn_h,
-                    .font_size = btn_font);
+    bool decks_clicked = sk_button_clicked("decks");
+    sk_place_button(.name="decks",.text="Decks",.x=top_btn_x,.y=top_btn_y,.w=top_btn_w,.h=top_btn_h,.font_size=btn_font);
     anki_info_render(state);
-    if (sk_button_clicked("decks") || sk_is_key_pressed(SK_KEY_D)) {
+    if (decks_clicked || sk_is_key_pressed(SK_KEY_D)) {
       anki_go_to_decks(state);
       return;
     }
@@ -1496,16 +1415,12 @@ static void anki_render(PromptState *state) {
       anki_go_to_decks(state);
       return;
     }
-    if (!g_focus_mode) {
-      sk_place_button(.name = "decks", .text = "Decks", .x = top_btn_x,
-                      .y = top_btn_y, .w = top_btn_w, .h = top_btn_h,
-                      .font_size = btn_font);
-      sk_place_button(.name = "info", .text = "Info",
-                      .x = top_btn_x + top_btn_w + 8, .y = top_btn_y,
-                      .w = top_btn_w, .h = top_btn_h, .font_size = btn_font);
-    }
     bool decks_clicked = sk_button_clicked("decks");
     bool info_clicked = sk_button_clicked("info");
+    if (!g_focus_mode) {
+      sk_place_button(.name="decks",.text="Decks",.x=top_btn_x,.y=top_btn_y,.w=top_btn_w,.h=top_btn_h,.font_size=btn_font);
+      sk_place_button(.name="info",.text="Info",.x=top_btn_x + top_btn_w + 8,.y=top_btn_y,.w=top_btn_w,.h=top_btn_h,.font_size=btn_font);
+    }
     if (decks_clicked) {
       anki_go_to_decks(state);
       return;
@@ -1518,24 +1433,21 @@ static void anki_render(PromptState *state) {
       return;
     }
   }
+  handle_grade_keys();
   if (g_view == ANKI_VIEW_DECKS) {
     sk_place_editbox(.placeholder = "Decks");
-    if (!sk_listbox_begin(.lb = state->lb,
-                          .item_height = FontSize * (g_big_mode ? 3 : 2)))
+    if (!sk_listbox_begin(.lb = state->lb, .item_height = FontSize * (g_big_mode ? 3 : 2)))
       return;
     SkListItemCtx ctx;
     while (sk_listbox_next(&ctx)) {
-      sk_draw_text(.text = ctx.text, .x = ctx.x + 12 + (g_big_mode ? 12 : 0),
-                   .y = ctx.y + 4 + (g_big_mode ? 6 : 0),
-                   .font_size = FontSize + (g_big_mode ? 8 : 0),
-                   .align = "LEFT");
+      sk_draw_text(.text = ctx.text, .x = ctx.x + 12 + (g_big_mode ? 12 : 0), .y = ctx.y + 4 + (g_big_mode ? 6 : 0),
+                   .font_size = FontSize + (g_big_mode ? 8 : 0), .align = "LEFT");
       const AnkiDeck *d = find_deck(ctx.text);
       if (d) {
         char count[64];
         snprintf(count, sizeof(count), "%d due", d->due);
         sk_draw_text(.text = count, .x = state->width - 16, .y = ctx.y,
-                     .font_size = 23 + (g_big_mode ? 10 : 0), .align = "RIGHT",
-                     .color = ANKI_SUB_COLOR);
+                     .font_size = 23 + (g_big_mode ? 10 : 0), .align = "RIGHT", .color = ANKI_SUB_COLOR);
       }
     }
     sk_listbox_end();
@@ -1543,8 +1455,8 @@ static void anki_render(PromptState *state) {
   }
 
   bool is_question = g_side == ANKI_SIDE_QUESTION;
-  bool cloze_answer =
-      !is_question && g_card_pos < g_card_count && g_cards[g_card_pos].cloze;
+  bool cloze_answer = !is_question && g_card_pos < g_card_count &&
+                      g_cards[g_card_pos].cloze;
   int side_margin = 24 + (g_big_mode ? 24 : 0);
   int max_w = state->width - side_margin * 2;
   int top_margin = 16 + (g_big_mode ? 32 : 0);
@@ -1553,12 +1465,12 @@ static void anki_render(PromptState *state) {
   if (avail_h < 40)
     avail_h = 40;
   int main_fs = FontSize + 16 + (g_focus_mode ? 10 : 0) + (g_big_mode ? 14 : 0);
-  int text_h =
-      measure_main_text(max_w, main_fs, main_fs, cloze_answer, is_question);
+  int text_h = measure_main_text(max_w, main_fs, main_fs, cloze_answer,
+                                 is_question);
   while (text_h > avail_h && main_fs > 12) {
     main_fs -= 2;
-    text_h =
-        measure_main_text(max_w, main_fs, main_fs, cloze_answer, is_question);
+    text_h = measure_main_text(max_w, main_fs, main_fs, cloze_answer,
+                               is_question);
   }
   int body_y = top_margin;
   if (text_h < avail_h)
@@ -1569,16 +1481,16 @@ static void anki_render(PromptState *state) {
                          .line_height = main_fs, .font_size = main_fs,
                          .color = COLOR_TEXT, .align = "LEFT");
   } else {
-    int next_y =
-        sk_draw_text_wrapped(.text = g_qtext, .x = side_margin, .y = body_y,
-                             .max_width = max_w, .line_height = main_fs,
-                             .font_size = main_fs, .color = ANKI_SUB_COLOR,
-                             .align = "LEFT");
+    int next_y = sk_draw_text_wrapped(.text = g_qtext, .x = side_margin, .y = body_y,
+                                      .max_width = max_w,
+                                      .line_height = main_fs,
+                                      .font_size = main_fs,
+                                      .color = ANKI_SUB_COLOR, .align = "LEFT");
     if (!is_question && g_abody[0])
-      sk_draw_text_wrapped(.text = g_abody, .x = side_margin,
-                           .y = next_y + main_fs, .max_width = max_w,
-                           .line_height = main_fs, .font_size = main_fs,
-                           .color = COLOR_TEXT, .align = "LEFT");
+      sk_draw_text_wrapped(.text = g_abody, .x = side_margin, .y = next_y + main_fs,
+                           .max_width = max_w, .line_height = main_fs,
+                           .font_size = main_fs, .color = COLOR_TEXT,
+                           .align = "LEFT");
   }
   if (!g_focus_mode) {
     if (g_side == ANKI_SIDE_ANSWER) {
@@ -1590,9 +1502,7 @@ static void anki_render(PromptState *state) {
       const char *names[4] = {"again", "hard", "good", "easy"};
       char *labels[4] = {"Again", "Hard", "Good", "Easy"};
       for (int i = 0; i < 4; i++)
-        sk_place_button(.name = names[i], .text = labels[i],
-                        .x = bx + i * (bw + gap), .h = bh, .y = by, .w = bw,
-                        .font_size = btn_font);
+        sk_place_button(.name=names[i],.text=labels[i],.x=bx + i * (bw + gap),.h=bh,.y=by,.w=bw,.font_size=btn_font);
 
       char iv_again[16] = "", iv_hard[16] = "", iv_good[16] = "",
            iv_easy[16] = "";
@@ -1606,13 +1516,9 @@ static void anki_render(PromptState *state) {
       const char *ivs[4] = {iv_again, iv_hard, iv_good, iv_easy};
       int iv_font = FontSize + (g_big_mode ? 6 : 0);
       int iv_y = by - (g_big_mode ? 44 : 34);
-      for (int i = 0; i < 4; i++) {
-        int tw = sk_get_text_width(ivs[i], iv_font);
-        sk_draw_text(.text = ivs[i],
-                     .x = bx + i * (bw + gap) + (bw - tw) / 2, .y = iv_y,
-                     .font_size = iv_font, .align = "LEFT",
-                     .color = ANKI_SUB_COLOR);
-      }
+      for (int i = 0; i < 4; i++)
+        sk_draw_text(.text = ivs[i], .x = bx + i * (bw + gap) + bw / 2, .y = iv_y,
+                     .font_size = iv_font, .align = "CENTER", .color = ANKI_SUB_COLOR);
     } else {
       int new_count = 0, learning = 0, due = 0;
       count_remaining(&new_count, &learning, &due);
@@ -1621,9 +1527,8 @@ static void anki_render(PromptState *state) {
       snprintf(learning_buf, sizeof(learning_buf), "%d", learning);
       snprintf(due_buf, sizeof(due_buf), "%d", due);
       SkTextSegment segments[5] = {
-          {new_buf, SK_BLUE},     {" + ", ANKI_SUB_COLOR},
-          {learning_buf, SK_RED}, {" + ", ANKI_SUB_COLOR},
-          {due_buf, SK_GREEN},
+          {new_buf, SK_BLUE},      {" + ", ANKI_SUB_COLOR}, {learning_buf, SK_RED},
+          {" + ", ANKI_SUB_COLOR}, {due_buf, SK_GREEN},
       };
       sk_draw_text_segments(.segments = segments, .count = 5,
                             .x = g_big_mode ? state->width / 2 : 435,
@@ -1632,11 +1537,7 @@ static void anki_render(PromptState *state) {
                             .color = ANKI_SUB_COLOR, .align = "CENTER");
       int show_w = g_big_mode ? 300 : 150;
       int show_h = g_big_mode ? 80 : 50;
-      sk_place_button(.name = "show", .text = "Show Answer",
-                      .x = (state->width - show_w) / 2, .h = show_h,
-                      .w = show_w,
-                      .y = state->height - (g_big_mode ? show_h + 40 : 76),
-                       .font_size = btn_font);
+      sk_place_button(.name="show",.text="Show Answer",.x=(state->width - show_w) / 2,.h=show_h,.w=show_w,.y=state->height-(g_big_mode ? show_h + 40 : 76),.font_size=btn_font);
     }
   }
 }
@@ -1693,16 +1594,15 @@ static void open_anki(void) {
   g_big_mode = false;
   g_open_settings_applied = false;
   if (sk_process_running("anki")) {
-    sk_message(.slot = TOP_CENTER,
-               .message =
-                   "Anki is currently running please close it and try again");
+    sk_message(.slot=TOP_CENTER,.message="Anki is currently running please close it and try again"); 
     return;
-  }
+  } 
 
   stats_check_day();
   g_session_timer = sk_timer_start();
   sk_window(.title = "Anki", .refresh = anki_refresh, .render = anki_render,
-            .enter = anki_enter, .on_close = anki_on_close);
+            .enter = anki_enter,
+            .on_close = anki_on_close);
 }
 
 SKALD_FEATURE_SHUTDOWN {
@@ -1720,16 +1620,16 @@ SKALD_FEATURE_INIT {
       sk_add_settings_entry(.name = "Anki", .icon = "/anki.png",
                             .desc = "Configure Anki Settings");
 
-  sk_settings_entry_add_checkbox(
-      anki, .key = "anki.open_fullscreened", .title = "Open Fullscreened",
-      .sub = "Makes anki always open in fullscreen mode");
+  sk_settings_entry_add_checkbox(anki, .key = "anki.open_fullscreened",
+                                 .title = "Open Fullscreened",
+                                 .sub = "Makes anki always open in fullscreen mode");
 
-  sk_settings_entry_add_checkbox(
-      anki, .key = "anki.open_hidden", .title = "Open Hidden",
-      .sub = "Makes anki always open in hidden mode with no buttons shown");
+  sk_settings_entry_add_checkbox(anki, .key = "anki.open_hidden",
+                                 .title = "Open Hidden",
+                                 .sub = "Makes anki always open in hidden mode with no buttons shown");
 
   stats_load();
-  sk_register_hotkey(.hotkey = "Alt+N", .cb = open_anki);
+  sk_register_hotkey(.hotkey="Alt+N",.cb=open_anki);
   sk_add_feature(.display_name = "Anki", .on_action = open_anki,
                  .icon = "/anki.png");
 }

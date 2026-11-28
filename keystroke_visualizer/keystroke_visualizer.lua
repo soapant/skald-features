@@ -1,39 +1,39 @@
 local sk = require("skapi")
 
 local NAME = "keystroke_visualizer"
-local W = 230
-local H = 50
 
 local display = ""
 local last = ""
 local count = 0
+local held = {}
+local shown = ""
 
-local function render()
+local function poll()
   while true do
     local ok, ev = sk.poll_key()
     if not ok then
       break
     end
-    if ev.down and not ev["repeat"] then
-      local label = sk.hotkey_to_string({ vk = ev.vk, mods = ev.mods }) or ""
-      if label == last then
-        count = count + 1
-      else
-        last = label
-        count = 1
+    if ev.down then
+      if not held[ev.vk] and not ev["repeat"] then
+        held[ev.vk] = true
+        local label = sk.hotkey_to_string({ vk = ev.vk, mods = ev.mods }) or ""
+        if label == last then
+          count = count + 1
+        else
+          last = label
+          count = 1
+        end
+        display = count > 1 and (label .. " " .. count .. "x") or label
       end
-      display = count > 1 and (label .. " " .. count .. "x") or label
+    else
+      held[ev.vk] = nil
     end
   end
-
-  sk.draw_text({
-      x = 60,
-      y = 10,
-      w = W,
-      h = H,
-      text = display,
-      align = "LEFT",
-  })
+  if display ~= shown then
+    sk.message({ name = NAME, message = display })
+    shown = display
+  end
 end
 
 local function toggle()
@@ -44,12 +44,13 @@ local function toggle()
   display = ""
   last = ""
   count = 0
+  held = {}
+  shown = ""
   sk.overlay({
       name = NAME,
       slot = sk.BOTTOM_CENTER,
-      render = render,
-      w = W,
-      h = H,
+      message = "",
+      render = poll,
       fps = 10,
   })
 end

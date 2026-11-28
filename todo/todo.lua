@@ -195,7 +195,7 @@ local function render(state)
                 pad = 0,
                 no_hscroll = true,
             })
-            x_offset = x_offset + #tag * (line_h / 2) + 34
+            x_offset = x_offset + #tag * math.floor(line_h / 2) + 34
         end
     end
     sk.listbox_end()

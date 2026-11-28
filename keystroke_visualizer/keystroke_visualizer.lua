@@ -37,8 +37,8 @@ local function poll()
 end
 
 local function toggle()
-  if sk.message_active(NAME) then
-    sk.dismiss_message(NAME)
+  if sk.overlay_active(NAME) then
+    sk.dismiss_overlay(NAME)
     return
   end
   display = ""

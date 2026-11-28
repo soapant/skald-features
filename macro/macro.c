@@ -500,19 +500,6 @@ static void PlayMacro(void) {
   release_everything();
 }
 
-static void macro_toggle_setting(const char *key) {
-  sk_config_set_setting(key,
-                        sk_config_get_setting_bool(key) ? "false" : "true");
-}
-
-static void infinite_playback_toggle(void) {
-  macro_toggle_setting(MACRO_INFINITE_PLAYBACK_KEY);
-}
-
-static void remove_dead_time_toggle(void) {
-  macro_toggle_setting(MACRO_REMOVE_DEAD_TIME_KEY);
-}
-
 static void record_toggle(void) {
   if (!recording) {
     macro_show_overlay(recording_render);
@@ -551,12 +538,6 @@ SKALD_FEATURE_INIT {
                .type = "Macro", .icon = "/save.png");
   sk_add_to_cc(.display_name = "Load Macro", .on_action = LoadMacro,
                .type = "Macro", .icon = "/load.png");
-  sk_add_to_cc(.display_name = "Infinite Playback",
-               .on_action = infinite_playback_toggle, .type = "Macro",
-               .icon = "/repeat.png");
-  sk_add_to_cc(.display_name = "Remove Dead Time",
-               .on_action = remove_dead_time_toggle, .type = "Macro",
-               .icon = "/clock-off.png");
 
   SkSettingsEntry *macro =
       sk_add_settings_entry(.name = "Macro", .icon = "/save.png",

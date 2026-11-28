@@ -1,0 +1,9 @@
+name = "keystroke_visualizer"
+description = ""
+
+[provides]
+
+
+[depends]
+
+"control_center"
